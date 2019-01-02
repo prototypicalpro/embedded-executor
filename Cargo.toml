@@ -1,0 +1,24 @@
+[package]
+name = "embedded-executor"
+version = "0.1.0"
+authors = ["Josh Robson Chase <josh@robsonchase.com>"]
+edition = "2018"
+
+[dependencies]
+lock_api = "0.1.5"
+
+[dependencies.futures-preview]
+version = "0.3.0-alpha.11"
+default-features = false
+
+[dependencies.generational-arena]
+version = "0.2.0"
+default_features = false
+optional = true
+
+[dev-dependencies]
+parking_lot = "0.7.1"
+
+[features]
+default = ["alloc"]
+alloc = ["generational-arena"]

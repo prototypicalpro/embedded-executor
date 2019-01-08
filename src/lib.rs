@@ -1,5 +1,10 @@
-#![feature(futures_api, const_fn, arbitrary_self_types)]
-#![feature(async_await, await_macro)]
+#![feature(
+    futures_api,
+    const_fn,
+    arbitrary_self_types,
+    generators,
+    proc_macro_hygiene
+)]
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(feature = "alloc", feature(alloc))]
 

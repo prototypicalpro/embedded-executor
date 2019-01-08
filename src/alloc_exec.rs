@@ -195,6 +195,10 @@ mod test {
         Executor as CoreExecutor,
         *,
     };
+    use embrio_async::{
+        async_block,
+        r#await,
+    };
     use parking_lot::RawMutex;
 
     struct NopSleep;
@@ -214,23 +218,27 @@ mod test {
         fn ring(&self) {}
     }
 
-    async fn foo() -> i32 {
-        5
+    fn foo() -> impl Future<Output = i32> {
+        async_block!({ 5 })
     }
 
-    async fn bar() -> i32 {
-        let a = await!(foo());
-        println!("{}", a);
-        let b = a + 1;
-        b
+    fn bar() -> impl Future<Output = i32> {
+        async_block!({
+            let a = r#await!(foo());
+            println!("{}", a);
+            let b = a + 1;
+            b
+        })
     }
 
-    async fn baz<S: Spawn>(mut spawner: S) {
-        let c = await!(bar());
-        for i in c..25 {
-            let spam = async move { println!("{}", i) };
-            spawner.spawn_obj(make_obj(spam)).unwrap();
-        }
+    fn baz<S: Spawn>(mut spawner: S) -> impl Future<Output = ()> {
+        async_block!({
+            let c = r#await!(bar());
+            for i in c..25 {
+                let spam = async_block!({ println!("{}", i) });
+                spawner.spawn_obj(make_obj(spam)).unwrap();
+            }
+        })
     }
 
     type Executor = CoreExecutor<
@@ -245,17 +253,15 @@ mod test {
     fn executor() {
         let mut executor = Executor::new(Arena::new(), Arc::new(Mutex::new(VecDeque::new())));
         let mut spawner = executor.spawner();
-        let entry = async move {
+        let entry = async_block!({
             for i in 0..10 {
                 spawner
-                    .spawn_obj(make_obj(
-                        async move {
-                            println!("{}", i);
-                        },
-                    ))
+                    .spawn_obj(make_obj(async_block! {
+                        println!("{}", i);
+                    }))
                     .unwrap();
             }
-        };
+        });
         executor.spawn(entry);
         executor.spawn(baz(executor.spawner()));
         executor.run();

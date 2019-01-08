@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 lock_api = "0.1.5"
+embrio-async = { path = "../embrio/embrio-async" }
 
 [dependencies.futures-preview]
 version = "0.3.0-alpha.11"

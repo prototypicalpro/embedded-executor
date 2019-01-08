@@ -8,6 +8,8 @@ extern crate alloc;
 
 mod prelude {
     #[cfg(feature = "alloc")]
+    pub use crate::future_box::make_obj;
+    #[cfg(feature = "alloc")]
     pub use alloc::prelude::*;
     pub use futures::prelude::*;
 }
@@ -16,3 +18,6 @@ pub mod core_traits;
 
 #[cfg(feature = "alloc")]
 pub mod alloc_exec;
+
+#[cfg(feature = "alloc")]
+mod future_box;

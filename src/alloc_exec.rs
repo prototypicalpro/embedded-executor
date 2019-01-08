@@ -1,24 +1,18 @@
 use core::{
     marker::PhantomData,
+    mem,
     pin::Pin,
 };
 
 use alloc::{
     collections::VecDeque,
     sync::Arc,
-    task::{
-        local_waker_from_nonlocal,
-        Wake,
-    },
+    task::local_waker_from_nonlocal,
 };
 
 use futures::{
-    future::{
-        FutureObj,
-        UnsafeFutureObj,
-    },
+    future::FutureObj,
     task::{
-        LocalWaker,
         Poll,
         Spawn,
         SpawnError,
@@ -38,33 +32,38 @@ use crate::{
     prelude::*,
 };
 
-impl<R, I> PollQueue for Mutex<R, VecDeque<I>>
+impl<I> PollQueue for VecDeque<I>
 where
-    R: RawMutex + Send + Sync + 'static,
     I: Copy + Send + Sync + 'static,
 {
     type Id = I;
 
-    fn enqueue(&self, id: I) {
-        self.lock().push_back(id);
+    fn enqueue(&mut self, id: I) {
+        self.push_back(id);
     }
 
-    fn dequeue(&self) -> Option<I> {
-        self.lock().pop_front()
+    fn dequeue(&mut self) -> Option<I> {
+        self.pop_front()
     }
 }
 
-struct QueueWaker<Q: PollQueue, A: Alarm>(Arc<Q>, <Q as PollQueue>::Id, A);
-
-impl<Q, A> Wake for QueueWaker<Q, A>
+unsafe impl<R, I> UnsafePollQueue<R> for Arc<Mutex<R, VecDeque<I>>>
 where
-    Q: PollQueue + Send + Sync,
-    <Q as PollQueue>::Id: Copy + Send + Sync,
-    A: Alarm + Send + Sync,
+    R: RawMutex + Send + Sync,
+    I: Copy + Send + Sync + 'static,
 {
-    fn wake(arc_self: &Arc<Self>) {
-        arc_self.0.enqueue(arc_self.1);
-        arc_self.2.ring();
+    type Inner = VecDeque<I>;
+    fn into_shared(self) -> *const Mutex<R, Self::Inner> {
+        Arc::into_raw(self)
+    }
+    unsafe fn clone_raw(ptr: *const Mutex<R, Self::Inner>) -> *const Mutex<R, Self::Inner> {
+        let orig = Arc::from_raw(ptr);
+        let new = Arc::into_raw(orig.clone());
+        mem::forget(orig);
+        new
+    }
+    unsafe fn drop_raw(ptr: *const Mutex<R, Self::Inner>) {
+        Arc::from_raw(ptr);
     }
 }
 
@@ -88,15 +87,17 @@ impl TaskReg<'static> for Arena<FutureObj<'static, ()>> {
     }
 }
 
-pub struct Executor<R, S>
+pub struct Executor<'t, T, Q, R, S>
 where
+    T: TaskReg<'t>,
+    Q: UnsafePollQueue<R>,
     R: RawMutex + Send + Sync,
     S: Sleep,
 {
-    registry: Arena<FutureObj<'static, ()>>,
-    poll_queue: Arc<Mutex<R, VecDeque<Index>>>,
+    registry: T,
+    poll_queue: *const Mutex<R, <Q as UnsafePollQueue<R>>::Inner>,
     spawn_queue: Arc<Mutex<R, VecDeque<FutureObj<'static, ()>>>>,
-    _sleep: PhantomData<fn(S)>,
+    _sleep: PhantomData<fn(S, &'t ())>,
 }
 
 pub struct Spawner<R>(Arc<Mutex<R, VecDeque<FutureObj<'static, ()>>>>)
@@ -122,43 +123,17 @@ where
     }
 }
 
-struct FutureBox<F>(Box<F>);
-
-unsafe impl<'a, T, F> UnsafeFutureObj<'a, T> for FutureBox<F>
+impl<'t, T, Q, R, S> Executor<'t, T, Q, R, S>
 where
-    F: Future<Output = T> + 'a,
-{
-    fn into_raw(self) -> *mut () {
-        Box::into_raw(self.0) as *mut ()
-    }
-
-    unsafe fn poll(ptr: *mut (), lw: &LocalWaker) -> Poll<T> {
-        let ptr = ptr as *mut F;
-        let pin: Pin<&mut F> = Pin::new_unchecked(&mut *ptr);
-        F::poll(pin, lw)
-    }
-
-    unsafe fn drop(ptr: *mut ()) {
-        drop(Box::from_raw(ptr as *mut F))
-    }
-}
-
-fn make_obj<F>(future: F) -> FutureObj<'static, <F as Future>::Output>
-where
-    F: Future + Send + 'static,
-{
-    FutureObj::new(FutureBox(Box::new(future)))
-}
-
-impl<R, S> Executor<R, S>
-where
+    Q: UnsafePollQueue<R> + 'static,
+    T: TaskReg<'t, Id = <<Q as UnsafePollQueue<R>>::Inner as PollQueue>::Id>,
     R: RawMutex + Send + Sync + 'static,
     S: Sleep,
 {
-    pub fn new() -> Self {
+    pub fn new(registry: T, queue: Q) -> Self {
         Executor {
-            registry: Arena::new(),
-            poll_queue: Arc::new(Mutex::new(Default::default())),
+            registry,
+            poll_queue: queue.into_shared(),
             spawn_queue: Arc::new(Mutex::new(Default::default())),
             _sleep: PhantomData,
         }
@@ -170,7 +145,7 @@ where
 
     fn spawn_obj(&mut self, future: FutureObj<'static, ()>) {
         let id = self.registry.register(future);
-        self.poll_queue.enqueue(id);
+        unsafe { &*self.poll_queue }.lock().enqueue(id);
     }
 
     pub fn spawn<F>(&mut self, future: F)
@@ -182,22 +157,22 @@ where
 
     pub fn run(&mut self) {
         let sleep_handle = S::make_alarm();
-        let queue = self.poll_queue.clone();
         loop {
-            while let Some((future, id)) = self
-                .poll_queue
+            let registry = &mut self.registry;
+            let mut poll_queue = unsafe { &*self.poll_queue }.lock();
+            while let Some((future, id)) = poll_queue
                 .dequeue()
-                .and_then(|id| self.registry.get_mut(id).map(|f| (f, id)))
+                .and_then(|id| registry.get_mut(id).map(|f| (f, id)))
             {
                 let future = Pin::new(future);
-                let waker = Arc::new(QueueWaker(queue.clone(), id, sleep_handle.clone()));
+                let waker: Arc<QueueWaker<Q, R, _>> =
+                    Arc::new(QueueWaker::new(self.poll_queue, id, sleep_handle.clone()));
                 match future.poll(&local_waker_from_nonlocal(waker)) {
-                    Poll::Ready(_) => self.registry.deregister(id),
+                    Poll::Ready(_) => registry.deregister(id),
                     Poll::Pending => {}
                 }
             }
-            let spawn_queue = self.spawn_queue.clone();
-            let mut spawn_queue = spawn_queue.lock();
+            let mut spawn_queue = self.spawn_queue.lock();
             if spawn_queue.is_empty() {
                 if self.registry.is_empty() {
                     break;
@@ -206,7 +181,8 @@ where
                 }
             } else {
                 while let Some(future) = spawn_queue.pop_front() {
-                    self.spawn_obj(future)
+                    let id = registry.register(future);
+                    poll_queue.enqueue(id);
                 }
             }
         }
@@ -215,7 +191,10 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    use super::{
+        Executor as CoreExecutor,
+        *,
+    };
     use parking_lot::RawMutex;
 
     struct NopSleep;
@@ -254,9 +233,17 @@ mod test {
         }
     }
 
+    type Executor = CoreExecutor<
+        'static,
+        Arena<FutureObj<'static, ()>>,
+        Arc<Mutex<RawMutex, VecDeque<Index>>>,
+        RawMutex,
+        NopSleep,
+    >;
+
     #[test]
     fn executor() {
-        let mut executor = Executor::<RawMutex, NopSleep>::new();
+        let mut executor = Executor::new(Arena::new(), Arc::new(Mutex::new(VecDeque::new())));
         let mut spawner = executor.spawner();
         let entry = async move {
             for i in 0..10 {

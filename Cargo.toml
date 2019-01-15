@@ -9,10 +9,9 @@ lock_api = "0.1.5"
 
 [dev-dependencies.embrio-async] 
 git = "https://gitlab.com/polymer-kb/third-party/embrio-rs"
-branch = "wip"
 
 [dependencies.futures-preview]
-version = "0.3.0-alpha.11"
+version = "0.3.0-alpha.12"
 default-features = false
 
 [dependencies.generational-arena]

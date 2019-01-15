@@ -202,11 +202,42 @@ pub type Executor<'a, R, S> = AllocExecutor<'a, Arena<FutureObj<'a, ()>>, VecDeq
 #[cfg(test)]
 mod test {
     use super::*;
+    use core::sync::atomic::{
+        AtomicBool,
+        Ordering,
+        ATOMIC_BOOL_INIT,
+    };
     use embrio_async::{
         async_block,
         r#await,
     };
-    use parking_lot::RawMutex;
+    use lock_api::GuardSend;
+
+    // shamelessly borrowed from the lock_api docs
+    // 1. Define our raw lock type
+    pub struct RawSpinlock(AtomicBool);
+
+    // 2. Implement RawMutex for this type
+    unsafe impl RawMutex for RawSpinlock {
+        const INIT: RawSpinlock = RawSpinlock(ATOMIC_BOOL_INIT);
+
+        // A spinlock guard can be sent to another thread and unlocked there
+        type GuardMarker = GuardSend;
+
+        fn lock(&self) {
+            // Note: This isn't the best way of implementing a spinlock, but it
+            // suffices for the sake of this example.
+            while !self.try_lock() {}
+        }
+
+        fn try_lock(&self) -> bool {
+            self.0.swap(true, Ordering::Acquire)
+        }
+
+        fn unlock(&self) {
+            self.0.store(false, Ordering::Release);
+        }
+    }
 
     struct NopSleep;
     #[derive(Copy, Clone)]
@@ -250,7 +281,7 @@ mod test {
 
     #[test]
     fn executor() {
-        let mut executor = Executor::<RawMutex, NopSleep>::new();
+        let mut executor = Executor::<RawSpinlock, NopSleep>::new();
         let mut spawner = executor.spawner();
         let entry = async_block!({
             for i in 0..10 {

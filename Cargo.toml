@@ -7,9 +7,6 @@ edition = "2018"
 [dependencies]
 lock_api = "0.1.5"
 
-[dev-dependencies.embrio-async] 
-git = "https://gitlab.com/polymer-kb/third-party/embrio-rs"
-
 [dependencies.futures-preview]
 version = "0.3.0-alpha.12"
 default-features = false
@@ -19,8 +16,8 @@ version = "0.2.0"
 default_features = false
 optional = true
 
-[dev-dependencies]
-parking_lot = "0.7.1"
+[dev-dependencies.embrio-async] 
+git = "https://gitlab.com/polymer-kb/third-party/embrio-rs"
 
 [features]
 default = ["alloc"]

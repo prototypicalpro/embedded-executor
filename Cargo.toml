@@ -6,7 +6,10 @@ edition = "2018"
 
 [dependencies]
 lock_api = "0.1.5"
-embrio-async = { path = "../embrio/embrio-async" }
+
+[dev-dependencies.embrio-async] 
+git = "https://gitlab.com/polymer-kb/third-party/embrio-rs"
+branch = "wip"
 
 [dependencies.futures-preview]
 version = "0.3.0-alpha.11"

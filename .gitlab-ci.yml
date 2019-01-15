@@ -1,0 +1,12 @@
+stages:
+  - test
+
+test:
+  stage: test
+  image: rust
+  before_script:
+    - rustup default nightly
+    - rustup target add thumbv7m-none-eabi
+  script:
+    - cargo test
+    - cargo build --target thumbv7m-none-eabi

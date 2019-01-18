@@ -1,16 +1,16 @@
 use crate::prelude::*;
 
-use core::pin::Pin;
-
-use futures::{
-    future::{
-        FutureObj,
-        UnsafeFutureObj,
-    },
+use core::{
+    pin::Pin,
     task::{
         LocalWaker,
         Poll,
     },
+};
+
+use futures::future::{
+    FutureObj,
+    UnsafeFutureObj,
 };
 
 struct FutureBox<F>(Box<F>);

@@ -17,7 +17,7 @@ mod prelude {
     pub use futures::prelude::*;
 }
 
-pub mod core_traits;
+pub mod sleep;
 
 #[cfg(feature = "alloc")]
 pub mod alloc_exec;

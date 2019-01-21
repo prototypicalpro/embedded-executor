@@ -34,9 +34,9 @@ where
     }
 }
 
-pub fn make_obj<F>(future: F) -> FutureObj<'static, <F as Future>::Output>
+pub fn make_obj<'a, F>(future: F) -> FutureObj<'a, <F as Future>::Output>
 where
-    F: Future + Send + 'static,
+    F: Future + Send + 'a,
 {
     FutureObj::new(FutureBox(Box::new(future)))
 }

@@ -1,14 +1,12 @@
-use core::{
-    marker::PhantomData,
-    pin::Pin,
-    task::Poll,
-};
+use core::task::Poll;
+
+use pin_utils::pin_mut;
 
 use alloc::{
     collections::VecDeque,
     sync::Arc,
     task::{
-        local_waker_from_nonlocal,
+        local_waker,
         Wake,
     },
 };
@@ -55,13 +53,16 @@ where
 
 pub struct AllocExecutor<'a, R, S>
 where
-    R: RawMutex + Send + Sync,
+    R: RawMutex + Send + Sync + 'static,
     S: Sleep,
 {
-    registry: Arena<FutureObj<'a, ()>>,
+    registry: Arena<(
+        FutureObj<'a, ()>,
+        Option<Arc<QueueWaker<R, <S as Sleep>::Alarm>>>,
+    )>,
     poll_queue: Arc<Mutex<R, VecDeque<Index>>>,
     spawn_queue: Arc<Mutex<R, VecDeque<FutureObj<'static, ()>>>>,
-    _ph: PhantomData<(&'a (), fn(S))>,
+    alarm: <S as Sleep>::Alarm,
 }
 
 pub struct Spawner<R>(Arc<Mutex<R, VecDeque<FutureObj<'static, ()>>>>)
@@ -97,7 +98,7 @@ where
             registry: Arena::new(),
             poll_queue: Arc::new(Mutex::new(Default::default())),
             spawn_queue: Arc::new(Mutex::new(Default::default())),
-            _ph: PhantomData,
+            alarm: S::make_alarm(),
         }
     }
 
@@ -106,7 +107,12 @@ where
     }
 
     fn spawn_obj(&mut self, future: FutureObj<'static, ()>) {
-        let id = self.registry.insert(future);
+        let id = self.registry.insert((future, None));
+        self.registry.get_mut(id).unwrap().1 = Some(Arc::new(QueueWaker(
+            self.poll_queue.clone(),
+            id,
+            self.alarm.clone(),
+        )));
         self.poll_queue.lock().push_back(id);
     }
 
@@ -118,18 +124,17 @@ where
     }
 
     pub fn run(&mut self) {
-        let sleep_handle = S::make_alarm();
         let poll_queue = self.poll_queue.clone();
         let spawn_queue = self.spawn_queue.clone();
         loop {
-            while let Some((future, id)) = poll_queue
+            while let Some((future, waker, id)) = poll_queue
                 .lock()
                 .pop_front()
-                .and_then(|id| self.registry.get_mut(id).map(|f| (f, id)))
+                .and_then(|id| self.registry.get_mut(id).map(|(f, w)| (f, w, id)))
             {
-                let future = Pin::new(future);
-                let waker = Arc::new(QueueWaker(poll_queue.clone(), id, sleep_handle.clone()));
-                match future.poll(&local_waker_from_nonlocal(waker)) {
+                pin_mut!(future);
+                let waker = waker.as_ref().expect("waker not set").clone();
+                match future.poll(&unsafe { local_waker(waker) }) {
                     Poll::Ready(_) => {
                         self.registry.remove(id);
                     }
@@ -141,7 +146,7 @@ where
                 if self.registry.is_empty() {
                     break;
                 } else {
-                    S::sleep(&sleep_handle);
+                    S::sleep(&self.alarm);
                 }
             } else {
                 while let Some(future) = spawn_queue.pop_front() {

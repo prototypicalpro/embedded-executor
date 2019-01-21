@@ -337,11 +337,9 @@ mod test {
         let mut spawner = executor.spawner();
         let entry = async_block!({
             for i in 0..10 {
-                spawner
-                    .spawn_obj(make_obj(async_block! {
-                        println!("{}", i);
-                    }))
-                    .unwrap();
+                spawner.spawn_obj(make_obj(async_block! {
+                    println!("{}", i);
+                }));
             }
         });
         executor.spawn(entry);

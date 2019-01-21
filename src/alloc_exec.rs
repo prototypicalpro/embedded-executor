@@ -127,11 +127,12 @@ where
         let poll_queue = self.poll_queue.clone();
         let spawn_queue = self.spawn_queue.clone();
         loop {
-            while let Some((future, waker, id)) = poll_queue
-                .lock()
-                .pop_front()
-                .and_then(|id| self.registry.get_mut(id).map(|(f, w)| (f, w, id)))
-            {
+            while let Some(id) = poll_queue.lock().pop_front() {
+                let (future, waker) = if let Some(entry) = self.registry.get_mut(id) {
+                    entry
+                } else {
+                    continue;
+                };
                 pin_mut!(future);
                 let waker = waker.as_ref().expect("waker not set").clone();
                 match future.poll(&unsafe { local_waker(waker) }) {

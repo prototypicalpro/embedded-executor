@@ -3,7 +3,6 @@ use core::task::Poll;
 use pin_utils::pin_mut;
 
 use alloc::{
-    collections::VecDeque,
     sync::Arc,
     task::{
         local_waker,
@@ -23,10 +22,6 @@ use generational_arena::{
     Arena,
     Index,
 };
-use lock_api::{
-    Mutex,
-    RawMutex,
-};
 
 use crate::{
     future_box::*,
@@ -34,21 +29,21 @@ use crate::{
     sleep::*,
 };
 
+use crossbeam_deque::{
+    Injector,
+    Steal,
+};
+
 // Super simple Wake implementation
 // Sticks the Index into the queue and calls Alarm::ring
-struct QueueWaker<R: RawMutex + Send + Sync + 'static, A: Alarm>(
-    Arc<Mutex<R, VecDeque<Index>>>,
-    Index,
-    A,
-);
+struct QueueWaker<A: Alarm>(Arc<Injector<Index>>, Index, A);
 
-impl<R, A> Wake for QueueWaker<R, A>
+impl<A> Wake for QueueWaker<A>
 where
-    R: RawMutex + Send + Sync + 'static,
     A: Alarm,
 {
     fn wake(arc_self: &Arc<Self>) {
-        arc_self.0.lock().push_back(arc_self.1);
+        arc_self.0.push(arc_self.1);
         arc_self.2.ring();
     }
 }
@@ -65,9 +60,8 @@ where
 // TODO(Josh) Investigate lock-free queues rather than using Mutexes. Might not
 // really get us much for embedded devices where disabling interrupts is just an
 // instruction away, but could be beneficial if threads get involved.
-pub struct AllocExecutor<'a, R, S>
+pub struct AllocExecutor<'a, S>
 where
-    R: RawMutex + Send + Sync + 'static,
     S: Sleep,
 {
     // Wow, so this is an ugly type. Sorry about that.
@@ -78,10 +72,10 @@ where
     // functions.
     registry: Arena<(
         FutureObj<'a, ()>,
-        Option<Arc<QueueWaker<R, <S as Sleep>::Alarm>>>,
+        Option<Arc<QueueWaker<<S as Sleep>::Alarm>>>,
     )>,
-    poll_queue: Arc<Mutex<R, VecDeque<Index>>>,
-    spawn_queue: Arc<Mutex<R, VecDeque<FutureObj<'a, ()>>>>,
+    poll_queue: Arc<Injector<Index>>,
+    spawn_queue: Arc<Injector<FutureObj<'a, ()>>>,
     alarm: <S as Sleep>::Alarm,
 }
 
@@ -89,17 +83,12 @@ where
 ///
 /// This can be cloned and passed to an async function to allow it to spawn more
 /// tasks.
-pub struct Spawner<'a, R>(Arc<Mutex<R, VecDeque<FutureObj<'a, ()>>>>)
-where
-    R: RawMutex + Send + Sync + 'static;
+pub struct Spawner<'a>(Arc<Injector<FutureObj<'a, ()>>>);
 
-impl<'a, R> Spawner<'a, R>
-where
-    R: RawMutex + Send + Sync + 'static,
-{
+impl<'a> Spawner<'a> {
     /// Spawn a `FutureObj` into the corresponding `AllocExecutor`
     pub fn spawn_obj(&mut self, future: FutureObj<'a, ()>) {
-        self.0.lock().push_back(future);
+        self.0.push(future);
     }
 
     /// Spawn a `Future` into the corresponding `AllocExecutor`
@@ -115,28 +104,21 @@ where
     }
 }
 
-impl<'a, R> Clone for Spawner<'a, R>
-where
-    R: RawMutex + Send + Sync + 'static,
-{
+impl<'a> Clone for Spawner<'a> {
     fn clone(&self) -> Self {
         Spawner(self.0.clone())
     }
 }
 
-impl<'a, R> Spawn for Spawner<'a, R>
-where
-    R: RawMutex + Send + Sync + 'static,
-{
+impl<'a> Spawn for Spawner<'a> {
     fn spawn_obj(&mut self, future: FutureObj<'static, ()>) -> Result<(), SpawnError> {
         self.spawn_obj(future);
         Ok(())
     }
 }
 
-impl<'a, R, S> AllocExecutor<'a, R, S>
+impl<'a, S> AllocExecutor<'a, S>
 where
-    R: RawMutex + Send + Sync + 'static,
     S: Sleep,
 {
     /// Initialize a new `AllocExecutor`
@@ -146,15 +128,15 @@ where
         // TODO(Josh) `with_capacity`?
         AllocExecutor {
             registry: Arena::new(),
-            poll_queue: Arc::new(Mutex::new(Default::default())),
-            spawn_queue: Arc::new(Mutex::new(Default::default())),
+            poll_queue: Arc::new(Injector::new()),
+            spawn_queue: Arc::new(Injector::new()),
             alarm: S::make_alarm(),
         }
     }
 
     /// Get a handle to a `Spawner` that can be passed to `Future` constructors
     /// to spawn even *more* `Future`s
-    pub fn spawner(&self) -> Spawner<'a, R> {
+    pub fn spawner(&self) -> Spawner<'a> {
         Spawner(self.spawn_queue.clone())
     }
 
@@ -169,7 +151,7 @@ where
             id,
             self.alarm.clone(),
         )));
-        self.poll_queue.lock().push_back(id);
+        self.poll_queue.push(id);
     }
 
     /// Spawn a `Future` into the executor.
@@ -202,11 +184,16 @@ where
             // We're only going to handle one task per loop so that futures that
             // call wake immediately don't starve the spawner. We'll use the
             // remaining queue length to decide whether we need to sleep or not.
-            let (queue_len, front) = {
-                let mut queue = poll_queue.lock();
-                let front = queue.pop_front();
-                let queue_len = queue.len();
-                (queue_len, front)
+            let (poll_empty, front) = {
+                let front = loop {
+                    break match poll_queue.steal() {
+                        Steal::Empty => None,
+                        Steal::Success(t) => Some(t),
+                        Steal::Retry => continue,
+                    };
+                };
+                let empty = front.is_none() || poll_queue.is_empty();
+                (empty, front)
             };
 
             // It's possible that the waker is still hanging out somewhere and
@@ -229,7 +216,6 @@ where
                 }
             }
 
-            let mut spawn_queue = spawn_queue.lock();
             if spawn_queue.is_empty() {
                 // if there's nothing to spawn and nothing left in the task
                 // registry, there's nothing more to do and we can break.
@@ -237,13 +223,19 @@ where
                 // are more things waiting to be polled before deciding to sleep.
                 if self.registry.is_empty() {
                     break;
-                } else if queue_len == 0 {
+                } else if poll_empty {
                     S::sleep(&self.alarm);
                 }
             } else {
                 // If there *are* things to spawn, those will go straight into
                 // the poll queue, so we don't need to sleep here either.
-                while let Some(future) = spawn_queue.pop_front() {
+                while let Some(future) = loop {
+                    break match spawn_queue.steal() {
+                        Steal::Success(f) => Some(f),
+                        Steal::Empty => None,
+                        Steal::Retry => continue,
+                    };
+                } {
                     self.spawn_obj(future)
                 }
             }
@@ -254,42 +246,10 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use core::sync::atomic::{
-        AtomicBool,
-        Ordering,
-        ATOMIC_BOOL_INIT,
-    };
     use embrio_async::{
         async_block,
         r#await,
     };
-    use lock_api::GuardSend;
-
-    // shamelessly borrowed from the lock_api docs
-    // 1. Define our raw lock type
-    pub struct RawSpinlock(AtomicBool);
-
-    // 2. Implement RawMutex for this type
-    unsafe impl RawMutex for RawSpinlock {
-        const INIT: RawSpinlock = RawSpinlock(ATOMIC_BOOL_INIT);
-
-        // A spinlock guard can be sent to another thread and unlocked there
-        type GuardMarker = GuardSend;
-
-        fn lock(&self) {
-            // Note: This isn't the best way of implementing a spinlock, but it
-            // suffices for the sake of this example.
-            while !self.try_lock() {}
-        }
-
-        fn try_lock(&self) -> bool {
-            self.0.swap(true, Ordering::Acquire)
-        }
-
-        fn unlock(&self) {
-            self.0.store(false, Ordering::Release);
-        }
-    }
 
     struct NopSleep;
     #[derive(Copy, Clone)]
@@ -333,7 +293,7 @@ mod test {
 
     #[test]
     fn executor() {
-        let mut executor = AllocExecutor::<RawSpinlock, NopSleep>::new();
+        let mut executor = AllocExecutor::<NopSleep>::new();
         let mut spawner = executor.spawner();
         let entry = async_block!({
             for i in 0..10 {

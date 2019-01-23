@@ -20,7 +20,7 @@ optional = true
 git = "https://gitlab.com/polymer-kb/third-party/crossbeam"
 default_features = false
 features = ["nightly"]
-branch = "no_std_deque"
+branch = "embedded_compatible"
 
 [dev-dependencies.embrio-async] 
 git = "https://gitlab.com/polymer-kb/third-party/embrio-rs"

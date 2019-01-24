@@ -1,6 +1,8 @@
-use core::task::Poll;
-
-use pin_utils::pin_mut;
+use core::{
+    mem,
+    pin::Pin,
+    task::Poll,
+};
 
 use alloc::{
     collections::VecDeque,
@@ -14,6 +16,7 @@ use alloc::{
 use futures::{
     future::FutureObj,
     task::{
+        LocalWaker,
         Spawn,
         SpawnError,
     },
@@ -23,6 +26,7 @@ use generational_arena::{
     Arena,
     Index,
 };
+
 use lock_api::{
     Mutex,
     RawMutex,
@@ -34,22 +38,76 @@ use crate::{
     sleep::*,
 };
 
+// default registry capacity
+const REG_CAP: usize = 16;
+
+// default queue capacity
+const QUEUE_CAP: usize = 16;
+
+enum QueueItem<'a> {
+    Poll(Index),
+    Spawn(FutureObj<'a, ()>),
+}
+
+type Queue<'a> = VecDeque<QueueItem<'a>>;
+
+type QueueHandle<'a, R> = Arc<Mutex<R, Queue<'a>>>;
+
+fn new_queue<'a, R>(capacity: usize) -> QueueHandle<'a, R>
+where
+    R: RawMutex + Send + Sync,
+{
+    Arc::new(Mutex::new(Queue::with_capacity(capacity)))
+}
+
 // Super simple Wake implementation
 // Sticks the Index into the queue and calls Alarm::ring
-struct QueueWaker<R: RawMutex + Send + Sync + 'static, A: Alarm>(
-    Arc<Mutex<R, VecDeque<Index>>>,
-    Index,
-    A,
-);
+struct QueueWaker<R, A>
+where
+    R: RawMutex + Send + Sync,
+{
+    queue: QueueHandle<'static, R>,
+    id: Index,
+    alarm: A,
+}
+
+impl<R, A> QueueWaker<R, A>
+where
+    R: RawMutex + Send + Sync,
+{
+    fn new(queue: QueueHandle<'static, R>, id: Index, alarm: A) -> Self {
+        QueueWaker { queue, id, alarm }
+    }
+}
 
 impl<R, A> Wake for QueueWaker<R, A>
 where
-    R: RawMutex + Send + Sync + 'static,
+    R: RawMutex + Send + Sync,
     A: Alarm,
 {
     fn wake(arc_self: &Arc<Self>) {
-        arc_self.0.lock().push_back(arc_self.1);
-        arc_self.2.ring();
+        arc_self
+            .queue
+            .lock()
+            .push_back(QueueItem::Poll(arc_self.id));
+        arc_self.alarm.ring();
+    }
+}
+
+struct Task<'a> {
+    future: FutureObj<'a, ()>,
+    waker: Option<LocalWaker>,
+}
+
+impl<'a> Task<'a> {
+    fn new(future: FutureObj<'a, ()>) -> Task<'a> {
+        Task {
+            future,
+            waker: None,
+        }
+    }
+    fn set_waker(&mut self, waker: LocalWaker) {
+        self.waker = Some(waker);
     }
 }
 
@@ -67,21 +125,11 @@ where
 // instruction away, but could be beneficial if threads get involved.
 pub struct AllocExecutor<'a, R, S>
 where
-    R: RawMutex + Send + Sync + 'static,
+    R: RawMutex + Send + Sync,
     S: Sleep,
 {
-    // Wow, so this is an ugly type. Sorry about that.
-    // Anyway, we're storing our Wake-implementing type next to its task so that
-    // we can re-use the exact same Arc every time we poll it. That way we're
-    // not creating a new allocation on every poll and it gives the Future
-    // implementations the ability to take advantage of the `will_wake*`
-    // functions.
-    registry: Arena<(
-        FutureObj<'a, ()>,
-        Option<Arc<QueueWaker<R, <S as Sleep>::Alarm>>>,
-    )>,
-    poll_queue: Arc<Mutex<R, VecDeque<Index>>>,
-    spawn_queue: Arc<Mutex<R, VecDeque<FutureObj<'a, ()>>>>,
+    registry: Arena<Task<'a>>,
+    queue: QueueHandle<'a, R>,
     alarm: <S as Sleep>::Alarm,
 }
 
@@ -89,17 +137,17 @@ where
 ///
 /// This can be cloned and passed to an async function to allow it to spawn more
 /// tasks.
-pub struct Spawner<'a, R>(Arc<Mutex<R, VecDeque<FutureObj<'a, ()>>>>)
+pub struct Spawner<'a, R>(QueueHandle<'a, R>)
 where
-    R: RawMutex + Send + Sync + 'static;
+    R: RawMutex + Send + Sync;
 
 impl<'a, R> Spawner<'a, R>
 where
-    R: RawMutex + Send + Sync + 'static,
+    R: RawMutex + Send + Sync,
 {
     /// Spawn a `FutureObj` into the corresponding `AllocExecutor`
     pub fn spawn_obj(&mut self, future: FutureObj<'a, ()>) {
-        self.0.lock().push_back(future);
+        self.0.lock().push_back(QueueItem::Spawn(future));
     }
 
     /// Spawn a `Future` into the corresponding `AllocExecutor`
@@ -117,7 +165,7 @@ where
 
 impl<'a, R> Clone for Spawner<'a, R>
 where
-    R: RawMutex + Send + Sync + 'static,
+    R: RawMutex + Send + Sync,
 {
     fn clone(&self) -> Self {
         Spawner(self.0.clone())
@@ -126,7 +174,7 @@ where
 
 impl<'a, R> Spawn for Spawner<'a, R>
 where
-    R: RawMutex + Send + Sync + 'static,
+    R: RawMutex + Send + Sync,
 {
     fn spawn_obj(&mut self, future: FutureObj<'static, ()>) -> Result<(), SpawnError> {
         self.spawn_obj(future);
@@ -143,11 +191,16 @@ where
     ///
     /// Does nothing unless it's `run()`
     pub fn new() -> Self {
-        // TODO(Josh) `with_capacity`?
+        Self::with_capacity(REG_CAP, QUEUE_CAP)
+    }
+
+    /// Initialize a new `AllocExecutor` with the given capacities.
+    ///
+    /// Does nothing unless it's `run()`
+    pub fn with_capacity(registry: usize, queue: usize) -> Self {
         AllocExecutor {
-            registry: Arena::new(),
-            poll_queue: Arc::new(Mutex::new(Default::default())),
-            spawn_queue: Arc::new(Mutex::new(Default::default())),
+            registry: Arena::with_capacity(registry),
+            queue: new_queue(queue),
             alarm: S::make_alarm(),
         }
     }
@@ -155,7 +208,7 @@ where
     /// Get a handle to a `Spawner` that can be passed to `Future` constructors
     /// to spawn even *more* `Future`s
     pub fn spawner(&self) -> Spawner<'a, R> {
-        Spawner(self.spawn_queue.clone())
+        Spawner(self.queue.clone())
     }
 
     /// Spawn a `FutureObj` into the executor.
@@ -163,13 +216,22 @@ where
     /// Thanks to the `'a` lifetime bound, these don't necessarily have to be
     /// `'static` `Futures`, so long as they outlive the executor.
     pub fn spawn_obj(&mut self, future: FutureObj<'a, ()>) {
-        let id = self.registry.insert((future, None));
-        self.registry.get_mut(id).unwrap().1 = Some(Arc::new(QueueWaker(
-            self.poll_queue.clone(),
-            id,
-            self.alarm.clone(),
-        )));
-        self.poll_queue.lock().push_back(id);
+        let id = self.registry.insert(Task::new(future));
+
+        // Safety: The QueueWaker only deals in 'static lifetimed things, i.e.
+        // task `Index`es, only writes to the queue, and will never give anyone
+        // else this transmuted version.
+        let static_queue: QueueHandle<'static, R> = unsafe { mem::transmute(self.queue.clone()) };
+
+        let queue_waker = Arc::new(QueueWaker::new(static_queue, id, self.alarm.clone()));
+
+        // Safety: Our QueueWaker does the exact same thing for local vs
+        // non-local wake.
+        let local_waker = unsafe { local_waker(queue_waker) };
+        self.registry.get_mut(id).unwrap().set_waker(local_waker);
+
+        // Insert the newly spawned task into the queue to be polled
+        self.queue.lock().push_back(QueueItem::Poll(id));
     }
 
     /// Spawn a `Future` into the executor.
@@ -183,6 +245,32 @@ where
         self.spawn_obj(make_obj(future));
     }
 
+    /// Polls a task with the given id
+    ///
+    /// If no such task exists, it's a no-op.
+    /// If the task returns `Poll::Ready`, it will be removed from the registry.
+    fn poll_task(&mut self, id: Index) {
+        // It's possible that the waker is still hanging out somewhere and
+        // getting called even though its task is gone. If so, we can just
+        // skip it.
+        if let Some(Task { future, waker }) = self.registry.get_mut(id) {
+            let future = Pin::new(future);
+
+            let waker = waker
+                .as_ref()
+                .expect("waker not set, task spawned incorrectly");
+
+            // Safety: Our waker doesn't do anything special for wake_local vs
+            // wake, so this is safe.
+            match future.poll(waker) {
+                Poll::Ready(_) => {
+                    self.registry.remove(id);
+                }
+                Poll::Pending => {}
+            }
+        }
+    }
+
     /// Run the executor
     ///
     /// Each loop will poll at most one task from the queue and then check for
@@ -192,61 +280,25 @@ where
     /// Once there's nothing to spawn and nothing left in the registry, the
     /// executor will return.
     pub fn run(&mut self) {
-        // Cloning these pointers at the start so that we don't anger the borrow
+        // Cloning this pointer at the start so that we don't anger the borrow
         // checking gods.
-        let poll_queue = self.poll_queue.clone();
-        let spawn_queue = self.spawn_queue.clone();
+        let queue = self.queue.clone();
 
         loop {
-            // This will be the queue length *after* the front is popped.
-            // We're only going to handle one task per loop so that futures that
-            // call wake immediately don't starve the spawner. We'll use the
-            // remaining queue length to decide whether we need to sleep or not.
-            let (queue_len, front) = {
-                let mut queue = poll_queue.lock();
-                let front = queue.pop_front();
-                let queue_len = queue.len();
-                (queue_len, front)
-            };
-
-            // It's possible that the waker is still hanging out somewhere and
-            // getting called even though its task is gone. If so, we can just
-            // skip it.
-            if let Some((future, waker, id)) =
-                front.and_then(|id| self.registry.get_mut(id).map(|(f, w)| (f, w, id)))
-            {
-                pin_mut!(future);
-
-                let waker = waker.as_ref().expect("waker not set").clone();
-
-                // Our waker doesn't do anything special for wake_local vs wake,
-                // so this is safe.
-                match future.poll(&unsafe { local_waker(waker) }) {
-                    Poll::Ready(_) => {
-                        self.registry.remove(id);
+            while let Some(item) = queue.lock().pop_front() {
+                match item {
+                    QueueItem::Poll(id) => {
+                        self.poll_task(id);
                     }
-                    Poll::Pending => {}
+                    QueueItem::Spawn(task) => {
+                        self.spawn_obj(task);
+                    }
                 }
             }
-
-            let mut spawn_queue = spawn_queue.lock();
-            if spawn_queue.is_empty() {
-                // if there's nothing to spawn and nothing left in the task
-                // registry, there's nothing more to do and we can break.
-                // However, if the registry isn't empty, we need to know if there
-                // are more things waiting to be polled before deciding to sleep.
-                if self.registry.is_empty() {
-                    break;
-                } else if queue_len == 0 {
-                    S::sleep(&self.alarm);
-                }
-            } else {
-                // If there *are* things to spawn, those will go straight into
-                // the poll queue, so we don't need to sleep here either.
-                while let Some(future) = spawn_queue.pop_front() {
-                    self.spawn_obj(future)
-                }
+            if self.registry.is_empty() {
+                break;
             }
+            S::sleep(&self.alarm);
         }
     }
 }

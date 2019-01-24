@@ -6,14 +6,13 @@ edition = "2018"
 
 [dependencies]
 lock_api = "0.1.5"
-pin-utils = "0.1.0-alpha.4"
 
 [dependencies.futures-preview]
 version = "0.3.0-alpha.12"
 default-features = false
 
 [dependencies.generational-arena]
-version = "0.2.0"
+version = "0.2.1"
 default_features = false
 optional = true
 

@@ -38,11 +38,11 @@ use crate::{
     sleep::*,
 };
 
-// default registry capacity
+// default initial registry capacity
 const REG_CAP: usize = 16;
 
-// default queue capacity
-const QUEUE_CAP: usize = 16;
+// default initial queue capacity
+const QUEUE_CAP: usize = REG_CAP / 2;
 
 enum QueueItem<'a> {
     Poll(Index),
@@ -96,6 +96,7 @@ where
 
 struct Task<'a> {
     future: FutureObj<'a, ()>,
+    // Invariant: waker should always be Some after the task has been spawned.
     waker: Option<LocalWaker>,
 }
 

@@ -271,6 +271,10 @@ where
         }
     }
 
+    fn dequeue(&self) -> Option<QueueItem<'a>> {
+        self.queue.lock().pop_front()
+    }
+
     /// Run the executor
     ///
     /// Each loop will poll at most one task from the queue and then check for
@@ -280,15 +284,8 @@ where
     /// Once there's nothing to spawn and nothing left in the registry, the
     /// executor will return.
     pub fn run(&mut self) {
-        // Cloning this pointer at the start so that we don't anger the borrow
-        // checking gods.
-        let queue = self.queue.clone();
-
         loop {
-            while let Some(item) = {
-                let item = queue.lock().pop_front();
-                item
-            } {
+            while let Some(item) = self.dequeue() {
                 match item {
                     QueueItem::Poll(id) => {
                         self.poll_task(id);

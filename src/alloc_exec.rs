@@ -285,7 +285,10 @@ where
         let queue = self.queue.clone();
 
         loop {
-            while let Some(item) = queue.lock().pop_front() {
+            while let Some(item) = {
+                let item = queue.lock().pop_front();
+                item
+            } {
                 match item {
                     QueueItem::Poll(id) => {
                         self.poll_task(id);

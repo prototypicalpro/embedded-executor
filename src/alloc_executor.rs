@@ -110,7 +110,7 @@ where
     }
 
     /// "Real" spawn method
-    fn spawn_local_obj(&mut self, future: LocalFutureObj<'a, ()>) {
+    fn spawn_local(&mut self, future: LocalFutureObj<'a, ()>) {
         let id = self.registry.insert(Task::new(future));
 
         let queue_waker = Arc::new(QueueWaker::new(self.queue.clone(), id, self.alarm.clone()));
@@ -127,7 +127,7 @@ where
     where
         F: UnsafeFutureObj<'a, ()>,
     {
-        self.spawn_local_obj(LocalFutureObj::new(future))
+        self.spawn_local(LocalFutureObj::new(future))
     }
 
     /// Spawn a `Future` into the executor.
@@ -185,7 +185,7 @@ where
                         self.poll_task(id);
                     }
                     QueueItem::Spawn(task) => {
-                        self.spawn_local_obj(task.into());
+                        self.spawn_local(task.into());
                     }
                 }
             }
@@ -359,7 +359,7 @@ where
     where
         F: UnsafeFutureObj<'a, ()> + Send,
     {
-        self.spawn(FutureObj::new(future));
+        self.spawn_obj(FutureObj::new(future));
     }
 
     /// Spawn a `Future` into the corresponding `AllocExecutor`

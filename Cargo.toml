@@ -6,6 +6,7 @@ edition = "2018"
 license = "MIT/Apache-2.0"
 description = "Embedded systems-friendly `Futures` executor"
 documentation = "https://docs.rs/embedded-executor"
+repository = "https://gitlab.com/polymer-kb/firmware/embedded-executor"
 
 [dependencies]
 lock_api = "0.1.5"

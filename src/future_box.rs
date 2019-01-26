@@ -1,3 +1,5 @@
+//! Workaround until `futures-preview` provides `no_std` `alloc` support.
+
 use crate::prelude::*;
 
 use core::{
@@ -8,10 +10,7 @@ use core::{
     },
 };
 
-use futures::future::{
-    FutureObj,
-    UnsafeFutureObj,
-};
+use futures::future::UnsafeFutureObj;
 
 struct FutureBox<F>(Box<F>);
 
@@ -34,9 +33,16 @@ where
     }
 }
 
-pub fn make_obj<'a, F>(future: F) -> FutureObj<'a, <F as Future>::Output>
+pub fn make_obj<'a, F, T>(future: F) -> impl UnsafeFutureObj<'a, T> + Send
 where
-    F: Future + Send + 'a,
+    F: Future<Output = T> + Send + 'a,
 {
-    FutureObj::new(FutureBox(Box::new(future)))
+    FutureBox(Box::new(future))
+}
+
+pub fn make_local<'a, F, T>(future: F) -> impl UnsafeFutureObj<'a, T>
+where
+    F: Future<Output = T> + 'a,
+{
+    FutureBox(Box::new(future))
 }

@@ -1,10 +1,5 @@
-#![feature(
-    futures_api,
-    const_fn,
-    arbitrary_self_types,
-    generators,
-    proc_macro_hygiene
-)]
+#![feature(futures_api)]
+#![feature(generators, proc_macro_hygiene)]
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(feature = "alloc", feature(alloc))]
 
@@ -17,10 +12,13 @@ mod prelude {
     pub use futures::prelude::*;
 }
 
-pub mod sleep;
+mod sleep;
+pub use sleep::*;
 
 #[cfg(feature = "alloc")]
-pub mod alloc_exec;
+pub mod alloc_executor;
+#[cfg(feature = "alloc")]
+pub use alloc_executor::AllocExecutor;
 
 #[cfg(feature = "alloc")]
-pub mod future_box;
+mod future_box;

@@ -19,9 +19,6 @@ version = "0.2.1"
 default_features = false
 optional = true
 
-[dev-dependencies.embrio-async] 
-git = "https://gitlab.com/polymer-kb/third-party/embrio-rs"
-
 [features]
 default = ["alloc"]
 alloc = ["generational-arena"]

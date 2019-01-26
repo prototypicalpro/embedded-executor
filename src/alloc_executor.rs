@@ -412,12 +412,12 @@ mod test {
         Ordering,
         ATOMIC_BOOL_INIT,
     };
-    use embrio_async::{
-        async_block,
-        r#await,
-    };
     use futures::{
-        future::FutureObj,
+        future::{
+            self,
+            FutureExt,
+            FutureObj,
+        },
         task::Spawn,
     };
     use lock_api::GuardSend;
@@ -466,27 +466,26 @@ mod test {
     }
 
     fn foo() -> impl Future<Output = i32> {
-        async_block!({ 5 })
+        future::ready(5)
     }
 
     fn bar() -> impl Future<Output = i32> {
-        async_block!({
-            let a = r#await!(foo());
+        foo().then(|a| {
             println!("{}", a);
             let b = a + 1;
-            b
+            future::ready(b)
         })
     }
 
     fn baz<S: Spawn>(mut spawner: S) -> impl Future<Output = ()> {
-        async_block!({
-            let c = r#await!(bar());
+        bar().then(move |c| {
             for i in c..25 {
-                let spam = async_block!({ println!("{}", i) });
+                let spam = future::lazy(move |_| println!("{}", i));
                 spawner
                     .spawn_obj(FutureObj::new(future_box::make_obj(spam)))
                     .unwrap();
             }
+            future::ready(())
         })
     }
 
@@ -494,11 +493,11 @@ mod test {
     fn executor() {
         let mut executor = AllocExecutor::<RawSpinlock, NopSleep>::new();
         let mut spawner = executor.spawner();
-        let entry = async_block!({
+        let entry = future::lazy(move |_| {
             for i in 0..10 {
-                spawner.spawn_raw(future_box::make_obj(async_block! {
+                spawner.spawn_raw(future_box::make_obj(future::lazy(move |_| {
                     println!("{}", i);
-                }));
+                })));
             }
         });
         executor.spawn(entry);

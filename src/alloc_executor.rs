@@ -126,7 +126,11 @@ where
     fn spawn_local(&mut self, future: LocalFutureObj<'a, ()>, loc: SpawnLoc) {
         let id = self.registry.insert(Task::new(future));
 
-        let queue_waker = Arc::new(QueueWaker::new(self.queue.clone(), id, self.sleeper.clone()));
+        let queue_waker = Arc::new(QueueWaker::new(
+            self.queue.clone(),
+            id,
+            self.sleeper.clone(),
+        ));
 
         let local_waker = queue_waker.into_local_waker();
         self.registry.get_mut(id).unwrap().set_waker(local_waker);

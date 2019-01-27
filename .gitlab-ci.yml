@@ -1,12 +1,24 @@
 stages:
   - test
 
-test:
-  stage: test
+.test rust:
   image: rust
+  stage: test
   before_script:
     - rustup default nightly
-    - rustup target add thumbv7m-none-eabi
+
+test thumbv7m build:
+  extends: .test rust
   script:
-    - cargo test
+    - rustup target add thumbv7m-none-eabi
     - cargo build --target thumbv7m-none-eabi
+
+test std:
+  extends: .test rust
+  script:
+    - cargo test --no-default-features --features std
+
+test alloc:
+  extends: .test rust
+  script:
+    - cargo test --no-default-features --features alloc

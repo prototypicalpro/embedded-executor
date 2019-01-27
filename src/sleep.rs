@@ -1,28 +1,57 @@
 //! Abstraction over platform-specific thread sleeping mechanisms.
 
-/// Main Sleep trait
+/// Platform-agnostic Sleep trait
 ///
-/// Provides a mechanism to create an `Alarm` to wait for.
+/// Provides a mechanism to initialize a handle that can be used to either sleep
+/// or wake the current thread.
 ///
-/// Intended usage is to call `make_alarm` to create the `Alarm`, arrange for it
-/// to be "rung" when some event requiring wakeup occurs, and then `sleep` on it.
-///
-/// Here, the `Alarm` will be used in the `Wake` implementation to bring the
-/// event loop out of sleep.
-pub trait Sleep {
-    type Alarm: Alarm;
+/// Intended usage is to create the sleep handle via the `Default` constructor,
+/// arrange for `wake` to be called on it when an event occurs, and then call
+/// `sleep`. The current thread should then be put into a sleep/low
+/// power/otherwise yielded state until `wake` gets called elsewhere.
+pub trait Sleep: Default + Clone + Send + Sync + 'static {
+    /// Put the current thread to sleep until `Sleep::wake` is called.
+    fn sleep(&self);
 
-    /// Create an `Alarm` to wake up sleepers.
-    fn make_alarm() -> Self::Alarm;
-    /// Put the current thread to sleep until `Alarm::ring` is called.
-    fn sleep(handle: &Self::Alarm);
-}
-
-/// Alarm trait for waking up sleepers
-pub trait Alarm: Clone + Send + Sync + 'static {
     /// Wake up sleeping threads
     ///
     /// Currently unspecified as to whether this will wake up all, one, or some
     /// of potentially multiple sleeping threads.
-    fn ring(&self);
+    fn wake(&self);
 }
+
+#[cfg(any(feature = "alloc", feature = "std"))]
+mod provided {
+    use super::*;
+
+    use alloc::sync::Arc;
+
+    use core::sync::atomic::{
+        self,
+        AtomicBool,
+        Ordering::*,
+    };
+
+    /// Simple atomic spinlock sleep implementation.
+    #[derive(Default, Clone, Debug)]
+    pub struct SpinSleep(Arc<AtomicBool>);
+
+    impl Sleep for SpinSleep {
+        fn sleep(&self) {
+            loop {
+                if self.0.swap(false, Acquire) {
+                    break;
+                } else {
+                    atomic::spin_loop_hint();
+                }
+            }
+        }
+
+        fn wake(&self) {
+            self.0.store(true, Release);
+        }
+    }
+}
+
+#[cfg(any(feature = "std", feature = "alloc"))]
+pub use self::provided::*;

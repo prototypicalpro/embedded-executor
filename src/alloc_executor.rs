@@ -71,7 +71,7 @@ where
 {
     registry: Arena<Task<'a>>,
     queue: QueueHandle<'a, R>,
-    alarm: <S as Sleep>::Alarm,
+    sleeper: S,
 }
 
 impl<'a, R, S> AllocExecutor<'a, R, S>
@@ -93,7 +93,7 @@ where
         AllocExecutor {
             registry: Arena::with_capacity(registry),
             queue: new_queue(queue),
-            alarm: S::make_alarm(),
+            sleeper: S::default(),
         }
     }
 
@@ -113,7 +113,7 @@ where
     fn spawn_local(&mut self, future: LocalFutureObj<'a, ()>) {
         let id = self.registry.insert(Task::new(future));
 
-        let queue_waker = Arc::new(QueueWaker::new(self.queue.clone(), id, self.alarm.clone()));
+        let queue_waker = Arc::new(QueueWaker::new(self.queue.clone(), id, self.sleeper.clone()));
 
         let local_waker = queue_waker.into_local_waker();
         self.registry.get_mut(id).unwrap().set_waker(local_waker);
@@ -192,7 +192,7 @@ where
             if self.registry.is_empty() {
                 break;
             }
-            S::sleep(&self.alarm);
+            self.sleeper.sleep();
         }
     }
 }
@@ -233,28 +233,28 @@ enum QueueItem<'a> {
 
 // Super simple Wake implementation
 // Sticks the Index into the queue and calls Alarm::ring
-struct QueueWaker<R, A>
+struct QueueWaker<R, S>
 where
     R: RawMutex + Send + Sync,
 {
     queue: QueueHandle<'static, R>,
     id: Index,
-    alarm: A,
+    sleeper: S,
 }
 
-impl<R, A> QueueWaker<R, A>
+impl<R, S> QueueWaker<R, S>
 where
     R: RawMutex + Send + Sync + 'static,
-    A: Alarm,
+    S: Sleep,
 {
-    fn new<'a>(queue: QueueHandle<'a, R>, id: Index, alarm: A) -> Self {
+    fn new<'a>(queue: QueueHandle<'a, R>, id: Index, sleeper: S) -> Self {
         QueueWaker {
             // Safety: The QueueWaker only deals in 'static lifetimed things, i.e.
             // task `Index`es, only writes to the queue, and will never give anyone
             // else this transmuted version.
             queue: unsafe { mem::transmute(queue) },
             id,
-            alarm,
+            sleeper,
         }
     }
 
@@ -265,17 +265,17 @@ where
     }
 }
 
-impl<R, A> Wake for QueueWaker<R, A>
+impl<R, S> Wake for QueueWaker<R, S>
 where
     R: RawMutex + Send + Sync,
-    A: Alarm,
+    S: Sleep,
 {
     fn wake(arc_self: &Arc<Self>) {
         arc_self
             .queue
             .lock()
             .push_back(QueueItem::Poll(arc_self.id));
-        arc_self.alarm.ring();
+        arc_self.sleeper.wake();
     }
 }
 
@@ -406,7 +406,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::sleep::Alarm;
+    use crate::sleep::Sleep;
     use core::sync::atomic::{
         AtomicBool,
         Ordering,
@@ -448,21 +448,12 @@ mod test {
         }
     }
 
+    #[derive(Copy, Clone, Default)]
     struct NopSleep;
-    #[derive(Copy, Clone)]
-    struct NopAlarm;
 
     impl Sleep for NopSleep {
-        type Alarm = NopAlarm;
-
-        fn make_alarm() -> NopAlarm {
-            NopAlarm
-        }
-        fn sleep(_: &NopAlarm) {}
-    }
-
-    impl Alarm for NopAlarm {
-        fn ring(&self) {}
+        fn sleep(&self) {}
+        fn wake(&self) {}
     }
 
     fn foo() -> impl Future<Output = i32> {

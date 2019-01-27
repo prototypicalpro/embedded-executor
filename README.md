@@ -1,5 +1,6 @@
 # embedded-executor
 
+[![pipeline status](https://gitlab.com/polymer-kb/firmware/embedded-executor/badges/master/pipeline.svg)](https://gitlab.com/polymer-kb/firmware/embedded-executor/commits/master)
 [![version](https://img.shields.io/crates/v/embedded-executor.svg)](https://crates.io/crates/embedded-executor/)
 [![documentation](https://docs.rs/embedded-executor/badge.svg)](https://docs.rs/embedded-executor/)
 [![license](https://img.shields.io/crates/l/embedded-executor.svg)](https://crates.io/crates/embedded-executor/)

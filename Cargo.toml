@@ -1,6 +1,6 @@
 [package]
 name = "embedded-executor"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Josh Robson Chase <josh@robsonchase.com>"]
 edition = "2018"
 license = "MIT/Apache-2.0"
@@ -25,6 +25,6 @@ default_features = false
 optional = true
 
 [features]
-default = ["alloc"]
+default = ["std"]
 alloc = ["generational-arena", "alloc-facade/alloc"]
 std = ["generational-arena/std", "alloc-facade/std", "futures-preview/std"]

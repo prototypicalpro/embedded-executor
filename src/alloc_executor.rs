@@ -74,6 +74,12 @@ where
     sleeper: S,
 }
 
+/// See [`AllocExecutor::spawn_local`]
+enum SpawnLoc {
+    Front,
+    Back,
+}
+
 impl<'a, R, S> AllocExecutor<'a, R, S>
 where
     R: RawMutex + Send + Sync + 'static,
@@ -110,7 +116,14 @@ where
     }
 
     /// "Real" spawn method
-    fn spawn_local(&mut self, future: LocalFutureObj<'a, ()>) {
+    ///
+    /// Differentiates between spawning at the back of the queue and spawning at
+    /// the front of the queue. When `spawn` is called directly on the executor,
+    /// one would expect the futures to be polled in the order they were spawned,
+    /// so they should go to the back of the queue. When tasks are spawned via
+    /// the spawn/poll queue, they've already waited in line and get an express
+    /// ticket to the front.
+    fn spawn_local(&mut self, future: LocalFutureObj<'a, ()>, loc: SpawnLoc) {
         let id = self.registry.insert(Task::new(future));
 
         let queue_waker = Arc::new(QueueWaker::new(self.queue.clone(), id, self.sleeper.clone()));
@@ -118,8 +131,13 @@ where
         let local_waker = queue_waker.into_local_waker();
         self.registry.get_mut(id).unwrap().set_waker(local_waker);
 
-        // Insert the newly spawned task into the queue to be polled
-        self.queue.lock().push_back(QueueItem::Poll(id));
+        let item = QueueItem::Poll(id);
+        let mut lock = self.queue.lock();
+
+        match loc {
+            SpawnLoc::Front => lock.push_front(item),
+            SpawnLoc::Back => lock.push_back(item),
+        }
     }
 
     /// Spawn a local `UnsafeFutureObj` into the executor.
@@ -127,7 +145,7 @@ where
     where
         F: UnsafeFutureObj<'a, ()>,
     {
-        self.spawn_local(LocalFutureObj::new(future))
+        self.spawn_local(LocalFutureObj::new(future), SpawnLoc::Back)
     }
 
     /// Spawn a `Future` into the executor.
@@ -185,7 +203,7 @@ where
                         self.poll_task(id);
                     }
                     QueueItem::Spawn(task) => {
-                        self.spawn_local(task.into());
+                        self.spawn_local(task.into(), SpawnLoc::Front);
                     }
                 }
             }
@@ -344,12 +362,7 @@ where
     fn new(handle: QueueHandle<'a, R>) -> Self {
         Spawner(handle)
     }
-}
 
-impl<'a, R> Spawner<'a, R>
-where
-    R: RawMutex + Send + Sync,
-{
     fn spawn_obj(&mut self, future: FutureObj<'a, ()>) {
         self.0.lock().push_back(QueueItem::Spawn(future));
     }

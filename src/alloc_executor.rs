@@ -25,6 +25,7 @@ use futures::{
         UnsafeFutureObj,
     },
     task::{
+        LocalSpawn,
         Spawn,
         SpawnError,
     },
@@ -348,6 +349,16 @@ where
         F: Future<Output = ()> + 'a,
     {
         self.spawn_raw(future_box::make_local(future));
+    }
+}
+
+impl<'a, R> LocalSpawn for LocalSpawner<'a, R>
+where
+    R: RawMutex + Send + Sync,
+{
+    fn spawn_local_obj(&mut self, future: LocalFutureObj<'a, ()>) -> Result<(), SpawnError> {
+        self.spawn_local(future);
+        Ok(())
     }
 }
 

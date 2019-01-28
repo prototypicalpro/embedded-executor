@@ -55,6 +55,7 @@
 #![feature(generators, proc_macro_hygiene)]
 #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
 #![cfg_attr(feature = "alloc", feature(alloc))]
+#![warn(missing_docs)]
 
 mod sleep;
 pub use self::sleep::*;
@@ -62,7 +63,7 @@ pub use self::sleep::*;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub mod alloc_executor;
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub use self::alloc_executor::AllocExecutor;
+pub use self::alloc_executor::inner::AllocExecutor;
 
 #[cfg(any(feature = "alloc", feature = "std"))]
 mod future_box;

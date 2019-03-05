@@ -67,3 +67,6 @@ pub use self::alloc_executor::inner::AllocExecutor;
 
 #[cfg(any(feature = "alloc", feature = "std"))]
 mod future_box;
+
+mod wake;
+pub use self::wake::*;

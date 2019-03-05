@@ -12,18 +12,14 @@ pub(crate) mod inner {
         mem,
         pin::Pin,
         task::{
-            LocalWaker,
             Poll,
+            Waker,
         },
     };
 
     use alloc::{
         collections::VecDeque,
         sync::Arc,
-        task::{
-            local_waker,
-            Wake,
-        },
     };
 
     use futures::{
@@ -52,6 +48,10 @@ pub(crate) mod inner {
     use crate::{
         future_box,
         sleep::*,
+        wake::{
+            Wake,
+            WakeExt,
+        },
     };
 
     // default initial registry capacity
@@ -75,12 +75,11 @@ pub(crate) mod inner {
     /// state using something like `cortex_m::wfi/e`.
     pub struct AllocExecutor<'a, R, S>
     where
-        R: RawMutex + Send + Sync,
-        S: Sleep,
+        R: RawMutex,
     {
         registry: Arena<Task<'a>>,
         queue: QueueHandle<'a, R>,
-        sleeper: S,
+        sleep_waker: S,
     }
 
     /// See [`AllocExecutor::spawn_local`]
@@ -91,8 +90,8 @@ pub(crate) mod inner {
 
     impl<'a, R, S> AllocExecutor<'a, R, S>
     where
-        R: RawMutex + Send + Sync + 'static,
-        S: Sleep,
+        R: RawMutex,
+        S: Sleep + Wake + Clone + Default,
     {
         /// Initialize a new `AllocExecutor`
         ///
@@ -108,7 +107,7 @@ pub(crate) mod inner {
             AllocExecutor {
                 registry: Arena::with_capacity(registry),
                 queue: new_queue(queue),
-                sleeper: S::default(),
+                sleep_waker: S::default(),
             }
         }
 
@@ -138,11 +137,11 @@ pub(crate) mod inner {
             let queue_waker = Arc::new(QueueWaker::new(
                 self.queue.clone(),
                 id,
-                self.sleeper.clone(),
+                self.sleep_waker.clone(),
             ));
 
-            let local_waker = queue_waker.into_local_waker();
-            self.registry.get_mut(id).unwrap().set_waker(local_waker);
+            let waker = queue_waker.into_waker();
+            self.registry.get_mut(id).unwrap().set_waker(waker);
 
             let item = QueueItem::Poll(id);
             let mut lock = self.queue.lock();
@@ -223,7 +222,7 @@ pub(crate) mod inner {
                 if self.registry.is_empty() {
                     break;
                 }
-                self.sleeper.sleep();
+                self.sleep_waker.sleep();
             }
         }
     }
@@ -231,7 +230,7 @@ pub(crate) mod inner {
     struct Task<'a> {
         future: LocalFutureObj<'a, ()>,
         // Invariant: waker should always be Some after the task has been spawned.
-        waker: Option<LocalWaker>,
+        waker: Option<Waker>,
     }
 
     impl<'a> Task<'a> {
@@ -241,7 +240,7 @@ pub(crate) mod inner {
                 waker: None,
             }
         }
-        fn set_waker(&mut self, waker: LocalWaker) {
+        fn set_waker(&mut self, waker: Waker) {
             self.waker = Some(waker);
         }
     }
@@ -252,7 +251,7 @@ pub(crate) mod inner {
 
     fn new_queue<'a, R>(capacity: usize) -> QueueHandle<'a, R>
     where
-        R: RawMutex + Send + Sync,
+        R: RawMutex,
     {
         Arc::new(Mutex::new(Queue::with_capacity(capacity)))
     }
@@ -263,50 +262,41 @@ pub(crate) mod inner {
     }
 
     // Super simple Wake implementation
-    // Sticks the Index into the queue and calls Alarm::ring
-    struct QueueWaker<R, S>
+    // Sticks the Index into the queue and calls W::wake
+    struct QueueWaker<R, W>
     where
-        R: RawMutex + Send + Sync,
+        R: RawMutex,
     {
         queue: QueueHandle<'static, R>,
         id: Index,
-        sleeper: S,
+        waker: W,
     }
 
-    impl<R, S> QueueWaker<R, S>
+    impl<R, W> QueueWaker<R, W>
     where
-        R: RawMutex + Send + Sync + 'static,
-        S: Sleep,
+        R: RawMutex,
+        W: Wake,
     {
-        fn new<'a>(queue: QueueHandle<'a, R>, id: Index, sleeper: S) -> Self {
+        fn new<'a>(queue: QueueHandle<'a, R>, id: Index, waker: W) -> Self {
             QueueWaker {
                 // Safety: The QueueWaker only deals in 'static lifetimed things, i.e.
                 // task `Index`es, only writes to the queue, and will never give anyone
                 // else this transmuted version.
                 queue: unsafe { mem::transmute(queue) },
                 id,
-                sleeper,
+                waker,
             }
-        }
-
-        fn into_local_waker(self: Arc<Self>) -> LocalWaker {
-            // Safety: Our QueueWaker does the exact same thing for local vs
-            // non-local wake, so this is fine.
-            unsafe { local_waker(self) }
         }
     }
 
-    impl<R, S> Wake for QueueWaker<R, S>
+    impl<R, W> Wake for QueueWaker<R, W>
     where
-        R: RawMutex + Send + Sync,
-        S: Sleep,
+        R: RawMutex,
+        W: Wake,
     {
-        fn wake(arc_self: &Arc<Self>) {
-            arc_self
-                .queue
-                .lock()
-                .push_back(QueueItem::Poll(arc_self.id));
-            arc_self.sleeper.wake();
+        fn wake(&self) {
+            self.queue.lock().push_back(QueueItem::Poll(self.id));
+            self.waker.wake();
         }
     }
 
@@ -318,11 +308,11 @@ pub(crate) mod inner {
     #[derive(Clone)]
     pub struct LocalSpawner<'a, R>(Spawner<'a, R>, PhantomData<LocalFutureObj<'a, ()>>)
     where
-        R: RawMutex + Send + Sync;
+        R: RawMutex;
 
     impl<'a, R> LocalSpawner<'a, R>
     where
-        R: RawMutex + Send + Sync,
+        R: RawMutex,
     {
         fn new(spawner: Spawner<'a, R>) -> Self {
             LocalSpawner(spawner, PhantomData)
@@ -331,7 +321,7 @@ pub(crate) mod inner {
 
     impl<'a, R> LocalSpawner<'a, R>
     where
-        R: RawMutex + Send + Sync,
+        R: RawMutex,
     {
         fn spawn_local(&mut self, future: LocalFutureObj<'a, ()>) {
             // Safety: LocalSpawner is !Send and !Sync, so the future spawned will
@@ -362,7 +352,7 @@ pub(crate) mod inner {
 
     impl<'a, R> LocalSpawn for LocalSpawner<'a, R>
     where
-        R: RawMutex + Send + Sync,
+        R: RawMutex,
     {
         fn spawn_local_obj(&mut self, future: LocalFutureObj<'a, ()>) -> Result<(), SpawnError> {
             self.spawn_local(future);
@@ -376,11 +366,11 @@ pub(crate) mod inner {
     /// tasks.
     pub struct Spawner<'a, R>(QueueHandle<'a, R>)
     where
-        R: RawMutex + Send + Sync;
+        R: RawMutex;
 
     impl<'a, R> Spawner<'a, R>
     where
-        R: RawMutex + Send + Sync,
+        R: RawMutex,
     {
         fn new(handle: QueueHandle<'a, R>) -> Self {
             Spawner(handle)
@@ -413,7 +403,7 @@ pub(crate) mod inner {
 
     impl<'a, R> Clone for Spawner<'a, R>
     where
-        R: RawMutex + Send + Sync,
+        R: RawMutex,
     {
         fn clone(&self) -> Self {
             Spawner(self.0.clone())
@@ -422,7 +412,7 @@ pub(crate) mod inner {
 
     impl<'a, R> Spawn for Spawner<'a, R>
     where
-        R: RawMutex + Send + Sync,
+        R: RawMutex,
     {
         fn spawn_obj(&mut self, future: FutureObj<'static, ()>) -> Result<(), SpawnError> {
             self.spawn_obj(future);
@@ -432,7 +422,7 @@ pub(crate) mod inner {
 
     impl<'a, R> From<LocalSpawner<'a, R>> for Spawner<'a, R>
     where
-        R: RawMutex + Send + Sync,
+        R: RawMutex,
     {
         fn from(other: LocalSpawner<'a, R>) -> Self {
             other.0
@@ -488,6 +478,9 @@ pub(crate) mod inner {
 
         impl Sleep for NopSleep {
             fn sleep(&self) {}
+        }
+
+        impl Wake for NopSleep {
             fn wake(&self) {}
         }
 

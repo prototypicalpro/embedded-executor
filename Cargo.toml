@@ -1,6 +1,6 @@
 [package]
 name = "embedded-executor"
-version = "0.2.4"
+version = "0.3.0"
 authors = ["Josh Robson Chase <josh@robsonchase.com>"]
 edition = "2018"
 license = "MIT/Apache-2.0"
@@ -16,7 +16,7 @@ version = "0.2.0"
 features = ["futures"]
 
 [dependencies.futures-preview]
-version = "0.3.0-alpha.12"
+version = "0.3.0-alpha.13"
 default-features = false
 
 [dependencies.generational-arena]

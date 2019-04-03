@@ -12,7 +12,7 @@ repository = "https://gitlab.com/polymer-kb/firmware/embedded-executor"
 lock_api = "0.1.5"
 
 [dependencies.alloc-facade]
-version = "0.2.0"
+version = "0.3.1"
 features = ["futures"]
 
 [dependencies.futures-preview]
@@ -20,7 +20,7 @@ version = "0.3.0-alpha.13"
 default-features = false
 
 [dependencies.generational-arena]
-version = "0.2.1"
+version = "0.2.2"
 default_features = false
 optional = true
 

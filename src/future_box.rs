@@ -15,7 +15,7 @@ mod workaround {
         },
     };
 
-    use alloc::prelude::*;
+    use alloc::prelude::v1::*;
 
     use super::*;
 

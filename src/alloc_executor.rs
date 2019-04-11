@@ -12,6 +12,7 @@ pub(crate) mod inner {
         mem,
         pin::Pin,
         task::{
+            Context,
             Poll,
             Waker,
         },
@@ -185,7 +186,7 @@ pub(crate) mod inner {
                     .as_ref()
                     .expect("waker not set, task spawned incorrectly");
 
-                match future.poll(waker) {
+                match future.poll(&mut Context::from_waker(waker)) {
                     Poll::Ready(_) => {
                         self.registry.remove(id);
                     }
@@ -437,10 +438,13 @@ pub(crate) mod inner {
             AtomicBool,
             Ordering,
         };
+        use embrio_async::{
+            async_block,
+            async_fn,
+        };
         use futures::{
             future::{
                 self,
-                FutureExt,
                 FutureObj,
             },
             task::Spawn,
@@ -484,28 +488,31 @@ pub(crate) mod inner {
             fn wake(&self) {}
         }
 
-        fn foo() -> impl Future<Output = i32> {
-            future::ready(5)
+        #[async_fn]
+        fn foo() -> i32 {
+            5
         }
 
-        fn bar() -> impl Future<Output = i32> {
-            foo().then(|a| {
-                println!("{}", a);
-                let b = a + 1;
-                future::ready(b)
-            })
+        #[async_fn]
+        fn bar() -> i32 {
+            let a = ewait!(foo());
+            println!("{}", a);
+            let b = a + 1;
+            b
         }
 
-        fn baz<S: Spawn>(mut spawner: S) -> impl Future<Output = ()> {
-            bar().then(move |c| {
-                for i in c..25 {
-                    let spam = future::lazy(move |_| println!("{}", i));
-                    spawner
-                        .spawn_obj(FutureObj::new(future_box::make_obj(spam)))
-                        .unwrap();
-                }
-                future::ready(())
-            })
+        #[async_fn]
+        fn baz<S: Spawn>(mut spawner: S) {
+            let c = ewait!(bar());
+            for i in c..25 {
+                let spam = async_block! {
+                    println!("{}", i);
+                };
+                println!("spawning!");
+                spawner
+                    .spawn_obj(FutureObj::new(future_box::make_obj(spam)))
+                    .unwrap();
+            }
         }
 
         #[test]

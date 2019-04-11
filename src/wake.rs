@@ -56,11 +56,11 @@ mod arc {
     }
 
     pub fn arc_waker_vtable<T: Wake>() -> &'static RawWakerVTable {
-        &RawWakerVTable {
-            clone: clone_arc_waker_raw::<T>,
-            drop: drop_arc_waker_raw::<T>,
-            wake: wake_arc_waker_raw::<T>,
-        }
+        &RawWakerVTable::new(
+            clone_arc_waker_raw::<T>,
+            drop_arc_waker_raw::<T>,
+            wake_arc_waker_raw::<T>,
+        )
     }
 
 }

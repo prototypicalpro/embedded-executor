@@ -24,7 +24,14 @@ version = "0.2.2"
 default_features = false
 optional = true
 
+[dev-dependencies]
+embrio-async = { git = "https://gitlab.com/polymer-kb/third-party/embrio-rs" }
+
 [features]
 default = ["std"]
 alloc = ["generational-arena", "alloc-facade/alloc"]
 std = ["generational-arena/std", "alloc-facade/std", "futures-preview/std"]
+
+
+[patch.crates-io]
+futures-preview = { git = "https://github.com/taiki-e/futures-rs", branch = "futures_api" }

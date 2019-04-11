@@ -52,6 +52,7 @@
 //! completion before returning.
 
 #![feature(futures_api)]
+#![recursion_limit = "128"]
 #![feature(generators, proc_macro_hygiene)]
 #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
 #![cfg_attr(feature = "alloc", feature(alloc))]

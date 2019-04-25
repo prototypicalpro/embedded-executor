@@ -6,6 +6,7 @@ stages:
   stage: test
   before_script:
     - rustup default nightly
+    - rustup update nightly
 
 test thumbv7m build:
   extends: .test rust

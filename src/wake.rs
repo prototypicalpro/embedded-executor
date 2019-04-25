@@ -22,7 +22,7 @@ pub(crate) trait WakeExt: Wake + Sized {
     }
 
     fn into_waker(self: Arc<Self>) -> Waker {
-        unsafe { Waker::new_unchecked(self.into_raw_waker()) }
+        unsafe { Waker::from_raw(self.into_raw_waker()) }
     }
 }
 
@@ -52,14 +52,20 @@ mod arc {
     pub unsafe fn wake_arc_waker_raw<T: Wake>(ptr: *const ()) {
         let arc = Arc::<T>::from_raw(ptr as _);
         arc.wake();
+    }
+
+    pub unsafe fn wake_by_ref_arc_waker_raw<T: Wake>(ptr: *const ()) {
+        let arc = Arc::<T>::from_raw(ptr as _);
+        arc.wake();
         mem::forget(arc);
     }
 
     pub fn arc_waker_vtable<T: Wake>() -> &'static RawWakerVTable {
         &RawWakerVTable::new(
             clone_arc_waker_raw::<T>,
-            drop_arc_waker_raw::<T>,
             wake_arc_waker_raw::<T>,
+            wake_by_ref_arc_waker_raw::<T>,
+            drop_arc_waker_raw::<T>,
         )
     }
 

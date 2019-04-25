@@ -10,8 +10,8 @@ mod workaround {
     use core::{
         pin::Pin,
         task::{
+            Context,
             Poll,
-            Waker,
         },
     };
 
@@ -29,7 +29,7 @@ mod workaround {
             Box::into_raw(self.0) as *mut ()
         }
 
-        unsafe fn poll(ptr: *mut (), lw: &Waker) -> Poll<T> {
+        unsafe fn poll(ptr: *mut (), lw: &mut Context) -> Poll<T> {
             let ptr = ptr as *mut F;
             let pin: Pin<&mut F> = Pin::new_unchecked(&mut *ptr);
             F::poll(pin, lw)

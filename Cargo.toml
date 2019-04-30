@@ -16,7 +16,7 @@ version = "0.3.1"
 features = ["futures"]
 
 [dependencies.futures-preview]
-version = "0.3.0-alpha.14"
+version = "0.3.0-alpha.15"
 default-features = false
 
 [dependencies.generational-arena]

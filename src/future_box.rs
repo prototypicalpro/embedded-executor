@@ -1,20 +1,9 @@
 //! Workaround until `futures-preview` provides `no_std` `alloc` support.
 
-use futures::{
-    future::UnsafeFutureObj,
-    prelude::*,
-};
+use futures::{future::UnsafeFutureObj, prelude::*};
 
 #[cfg(feature = "alloc")]
 mod workaround {
-    use core::{
-        pin::Pin,
-        task::{
-            Context,
-            Poll,
-        },
-    };
-
     use alloc::prelude::v1::*;
 
     use super::*;
@@ -25,17 +14,11 @@ mod workaround {
     where
         F: Future<Output = T> + 'a,
     {
-        fn into_raw(self) -> *mut () {
-            Box::into_raw(self.0) as *mut ()
+        fn into_raw(self) -> *mut (dyn Future<Output = T> + 'a) {
+            Box::into_raw(self.0 as Box<dyn Future<Output = T> + 'a>) as *mut _
         }
 
-        unsafe fn poll(ptr: *mut (), lw: &mut Context) -> Poll<T> {
-            let ptr = ptr as *mut F;
-            let pin: Pin<&mut F> = Pin::new_unchecked(&mut *ptr);
-            F::poll(pin, lw)
-        }
-
-        unsafe fn drop(ptr: *mut ()) {
+        unsafe fn drop(ptr: *mut (dyn Future<Output = T> + 'a)) {
             drop(Box::from_raw(ptr as *mut F))
         }
     }

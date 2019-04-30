@@ -11,48 +11,24 @@ pub(crate) mod inner {
         marker::PhantomData,
         mem,
         pin::Pin,
-        task::{
-            Context,
-            Poll,
-            Waker,
-        },
+        task::{Context, Poll, Waker},
     };
 
-    use alloc::{
-        collections::VecDeque,
-        sync::Arc,
-    };
+    use alloc::{collections::VecDeque, sync::Arc};
 
     use futures::{
-        future::{
-            FutureObj,
-            LocalFutureObj,
-            UnsafeFutureObj,
-        },
-        task::{
-            LocalSpawn,
-            Spawn,
-            SpawnError,
-        },
+        future::{FutureObj, LocalFutureObj, UnsafeFutureObj},
+        task::{LocalSpawn, Spawn, SpawnError},
     };
 
-    use lock_api::{
-        Mutex,
-        RawMutex,
-    };
+    use lock_api::{Mutex, RawMutex};
 
-    use generational_arena::{
-        Arena,
-        Index,
-    };
+    use generational_arena::{Arena, Index};
 
     use crate::{
         future_box,
         sleep::*,
-        wake::{
-            Wake,
-            WakeExt,
-        },
+        wake::{Wake, WakeExt},
     };
 
     // default initial registry capacity
@@ -434,19 +410,10 @@ pub(crate) mod inner {
     mod test {
         use super::*;
         use crate::sleep::Sleep;
-        use core::sync::atomic::{
-            AtomicBool,
-            Ordering,
-        };
-        use embrio_async::{
-            async_block,
-            async_fn,
-        };
+        use core::sync::atomic::{AtomicBool, Ordering};
+        use embrio_async::{async_block, async_fn};
         use futures::{
-            future::{
-                self,
-                FutureObj,
-            },
+            future::{self, FutureObj},
             task::Spawn,
         };
         use lock_api::GuardSend;

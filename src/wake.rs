@@ -1,7 +1,4 @@
-use core::task::{
-    RawWaker,
-    Waker,
-};
+use core::task::{RawWaker, Waker};
 
 #[cfg(any(feature = "alloc", feature = "std"))]
 use alloc::sync::Arc;
@@ -31,10 +28,7 @@ impl<T> WakeExt for T where T: Sized + Wake {}
 
 #[cfg(any(feature = "alloc", feature = "std"))]
 mod arc {
-    use core::{
-        mem,
-        task::RawWakerVTable,
-    };
+    use core::{mem, task::RawWakerVTable};
 
     use super::*;
 

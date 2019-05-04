@@ -9,7 +9,7 @@ documentation = "https://docs.rs/embedded-executor"
 repository = "https://gitlab.com/polymer-kb/firmware/embedded-executor"
 
 [dependencies]
-lock_api = "0.1.5"
+lock_api = "0.2.0"
 
 [dependencies.alloc-facade]
 version = "0.3.1"

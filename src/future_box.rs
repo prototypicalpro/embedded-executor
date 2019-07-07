@@ -1,6 +1,9 @@
 //! Workaround until `futures-preview` provides `no_std` `alloc` support.
 
-use futures::{future::UnsafeFutureObj, prelude::*};
+use futures::{
+    future::UnsafeFutureObj,
+    prelude::*,
+};
 
 #[cfg(feature = "alloc")]
 mod workaround {

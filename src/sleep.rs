@@ -15,7 +15,11 @@ mod provided {
 
     use alloc::sync::Arc;
 
-    use core::sync::atomic::{self, AtomicBool, Ordering::*};
+    use core::sync::atomic::{
+        self,
+        AtomicBool,
+        Ordering::*,
+    };
 
     use crate::Wake;
 

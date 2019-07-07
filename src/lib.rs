@@ -53,6 +53,7 @@
 
 #![recursion_limit = "128"]
 #![feature(generators, proc_macro_hygiene)]
+#![cfg_attr(test, feature(async_await))]
 #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
 #![warn(missing_docs)]
 

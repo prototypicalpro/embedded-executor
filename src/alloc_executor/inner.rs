@@ -230,7 +230,6 @@ where
     }
 }
 
-
 struct Task<'a> {
     future: LocalFutureObj<'a, ()>,
     // Invariant: waker should always be Some after the task has been spawned.
@@ -243,7 +242,6 @@ impl<'a> Task<'a> {
             future,
             waker: None,
         }
-
     }
     fn set_waker(&mut self, waker: Waker) {
         self.waker = Some(waker);
@@ -442,10 +440,7 @@ mod test {
         AtomicBool,
         Ordering,
     };
-    use embrio_async::{
-        async_block,
-        async_fn,
-    };
+    use embrio_async::embrio_async;
     use futures::{
         future::{
             self,
@@ -491,24 +486,24 @@ mod test {
         fn wake(&self) {}
     }
 
-    #[async_fn]
-    fn foo() -> i32 {
+    #[embrio_async]
+    async fn foo() -> i32 {
         5
     }
 
-    #[async_fn]
-    fn bar() -> i32 {
-        let a = ewait!(foo());
+    #[embrio_async]
+    async fn bar() -> i32 {
+        let a = foo().await;
         println!("{}", a);
         let b = a + 1;
         b
     }
 
-    #[async_fn]
-    fn baz<S: Spawn>(mut spawner: S) {
-        let c = ewait!(bar());
+    #[embrio_async]
+    async fn baz<S: Spawn>(mut spawner: S) {
+        let c = bar().await;
         for i in c..25 {
-            let spam = async_block! {
+            let spam = async move {
                 println!("{}", i);
             };
             println!("spawning!");

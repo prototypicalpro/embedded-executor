@@ -52,10 +52,12 @@
 //! completion before returning.
 
 #![recursion_limit = "128"]
-#![feature(generators, proc_macro_hygiene)]
+#![feature(generators, proc_macro_hygiene, alloc_prelude)]
 #![cfg_attr(test, feature(async_await))]
 #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
 #![warn(missing_docs)]
+
+extern crate alloc;
 
 mod sleep;
 pub use self::sleep::*;

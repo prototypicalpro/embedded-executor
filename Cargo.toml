@@ -11,10 +11,6 @@ repository = "https://gitlab.com/polymer-kb/firmware/embedded-executor"
 [dependencies]
 lock_api = "0.3.0"
 
-[dependencies.alloc-facade]
-version = "0.3.1"
-features = ["futures"]
-
 [dependencies.futures-preview]
 version = "0.3.0-alpha.17"
 default-features = false
@@ -29,5 +25,5 @@ embrio-async = { git = "https://gitlab.com/polymer-kb/third-party/embrio-rs" }
 
 [features]
 default = ["alloc"]
-alloc = ["generational-arena", "alloc-facade/alloc"]
-std = ["generational-arena/std", "alloc-facade/std", "futures-preview/std"]
+alloc = ["generational-arena"]
+std = ["generational-arena/std", "futures-preview/std"]

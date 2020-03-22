@@ -9,14 +9,14 @@ documentation = "https://docs.rs/embedded-executor"
 repository = "https://gitlab.com/polymer-kb/firmware/embedded-executor"
 
 [dependencies]
-lock_api = "0.3.0"
+lock_api = "0.3.3"
 
-[dependencies.futures-preview]
-version = "0.3.0-alpha.17"
+[dependencies.futures]
+version = "0.3.4"
 default-features = false
 
 [dependencies.generational-arena]
-version = "0.2.2"
+version = "0.2.7"
 default_features = false
 optional = true
 
@@ -26,4 +26,4 @@ embrio-async = { git = "https://gitlab.com/polymer-kb/third-party/embrio-rs" }
 [features]
 default = ["alloc"]
 alloc = ["generational-arena"]
-std = ["generational-arena/std", "futures-preview/std"]
+std = ["generational-arena/std", "futures/std"]

@@ -326,18 +326,20 @@ impl<'a, R> LocalSpawner<'a, R>
 where
     R: RawMutex,
 {
-    fn spawn_local(&mut self, future: LocalFutureObj<'a, ()>) {
+    fn spawn_local(&self, future: LocalFutureObj<'a, ()>) -> Result<(), SpawnError> {
         // Safety: LocalSpawner is !Send and !Sync, so the future spawned will
         // always remain local to the executor.
-        self.0.spawn_obj(unsafe { future.into_future_obj() })
+        Ok(self
+            .0
+            .spawn_obj(unsafe { mem::transmute(future.into_future_obj()) }))
     }
 
     /// Spawn a `FutureObj` into the corresponding `AllocExecutor`
-    pub fn spawn_raw<F>(&mut self, future: F)
+    pub fn spawn_raw<F>(&mut self, future: F) -> Result<(), SpawnError>
     where
         F: UnsafeFutureObj<'a, ()>,
     {
-        self.spawn_local(LocalFutureObj::new(future));
+        self.spawn_local(LocalFutureObj::new(future))
     }
 
     /// Spawn a `Future` into the corresponding `AllocExecutor`
@@ -345,11 +347,11 @@ where
     /// While the lifetime on the Future is `'a`, unless you're calling this on a
     /// non-`'static` `Future` before the executor has started, you're most
     /// likely going to be stuck with the `Spawn` trait's `'static` bound.
-    pub fn spawn<F>(&mut self, future: F)
+    pub fn spawn<F>(&mut self, future: F) -> Result<(), SpawnError>
     where
         F: Future<Output = ()> + 'a,
     {
-        self.spawn_raw(future_box::make_local(future));
+        self.spawn_raw(future_box::make_local(future))
     }
 }
 
@@ -357,9 +359,8 @@ impl<'a, R> LocalSpawn for LocalSpawner<'a, R>
 where
     R: RawMutex,
 {
-    fn spawn_local_obj(&mut self, future: LocalFutureObj<'a, ()>) -> Result<(), SpawnError> {
-        self.spawn_local(future);
-        Ok(())
+    fn spawn_local_obj(&self, future: LocalFutureObj<'a, ()>) -> Result<(), SpawnError> {
+        self.spawn_local(future)
     }
 }
 
@@ -379,12 +380,12 @@ where
         Spawner(handle)
     }
 
-    fn spawn_obj(&mut self, future: FutureObj<'a, ()>) {
+    fn spawn_obj(&self, future: FutureObj<'a, ()>) {
         self.0.lock().push_back(QueueItem::Spawn(future));
     }
 
     /// Spawn a `FutureObj` into the corresponding `AllocExecutor`
-    pub fn spawn_raw<F>(&mut self, future: F)
+    pub fn spawn_raw<F>(&self, future: F)
     where
         F: UnsafeFutureObj<'a, ()> + Send,
     {
@@ -417,9 +418,8 @@ impl<'a, R> Spawn for Spawner<'a, R>
 where
     R: RawMutex,
 {
-    fn spawn_obj(&mut self, future: FutureObj<'static, ()>) -> Result<(), SpawnError> {
-        self.spawn_obj(future);
-        Ok(())
+    fn spawn_obj(&self, future: FutureObj<'static, ()>) -> Result<(), SpawnError> {
+        Ok(Spawner::spawn_obj(self, future))
     }
 }
 

@@ -12,8 +12,9 @@ repository = "https://gitlab.com/polymer-kb/firmware/embedded-executor"
 lock_api = "0.3.3"
 
 [dependencies.futures]
-version = "0.3.4"
+version = "0.3"
 default-features = false
+features = ["alloc", "unstable", "cfg-target-has-atomic"]
 
 [dependencies.generational-arena]
 version = "0.2.7"
@@ -27,3 +28,4 @@ embrio-async = { git = "https://gitlab.com/polymer-kb/third-party/embrio-rs" }
 default = ["alloc"]
 alloc = ["generational-arena"]
 std = ["generational-arena/std", "futures/std"]
+spinsleep = []

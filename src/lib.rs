@@ -52,7 +52,7 @@
 //! completion before returning.
 
 #![recursion_limit = "128"]
-#![feature(generators, proc_macro_hygiene, alloc_prelude)]
+#![feature(generators, proc_macro_hygiene, alloc_prelude, cfg_target_has_atomic)]
 #![cfg_attr(test, feature(async_await))]
 #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
 #![warn(missing_docs)]

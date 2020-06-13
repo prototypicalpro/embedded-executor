@@ -9,7 +9,7 @@ pub trait Sleep {
     fn sleep(&self);
 }
 
-#[cfg(any(feature = "alloc", feature = "std"))]
+#[cfg(all(any(feature = "alloc", feature = "std"), feature = "spinsleep"))]
 mod provided {
     use super::*;
 
@@ -46,5 +46,5 @@ mod provided {
     }
 }
 
-#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg(all(any(feature = "alloc", feature = "std"), feature = "spinsleep"))]
 pub use self::provided::*;

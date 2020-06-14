@@ -3,8 +3,9 @@ use core::task::{
     Waker,
 };
 
+// WARNING: This should be Arc!
 #[cfg(any(feature = "alloc", feature = "std"))]
-use alloc::sync::Arc;
+use alloc::rc::Rc;
 
 /// Wake trait
 ///
@@ -17,11 +18,11 @@ pub trait Wake {
 
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub(crate) trait WakeExt: Wake + Sized {
-    fn into_raw_waker(self: Arc<Self>) -> RawWaker {
-        RawWaker::new(Arc::into_raw(self) as _, arc::arc_waker_vtable::<Self>())
+    fn into_raw_waker(self: Rc<Self>) -> RawWaker {
+        RawWaker::new(Rc::into_raw(self) as _, arc::arc_waker_vtable::<Self>())
     }
 
-    fn into_waker(self: Arc<Self>) -> Waker {
+    fn into_waker(self: Rc<Self>) -> Waker {
         unsafe { Waker::from_raw(self.into_raw_waker()) }
     }
 }
@@ -39,23 +40,23 @@ mod arc {
     use super::*;
 
     pub unsafe fn clone_arc_waker_raw<T: Wake>(ptr: *const ()) -> RawWaker {
-        let arc = Arc::<T>::from_raw(ptr as _);
+        let arc = Rc::<T>::from_raw(ptr as _);
         let cloned = arc.clone();
         mem::forget(arc);
         cloned.into_raw_waker()
     }
 
     pub unsafe fn drop_arc_waker_raw<T>(ptr: *const ()) {
-        drop(Arc::<T>::from_raw(ptr as _));
+        drop(Rc::<T>::from_raw(ptr as _));
     }
 
     pub unsafe fn wake_arc_waker_raw<T: Wake>(ptr: *const ()) {
-        let arc = Arc::<T>::from_raw(ptr as _);
+        let arc = Rc::<T>::from_raw(ptr as _);
         arc.wake();
     }
 
     pub unsafe fn wake_by_ref_arc_waker_raw<T: Wake>(ptr: *const ()) {
-        let arc = Arc::<T>::from_raw(ptr as _);
+        let arc = Rc::<T>::from_raw(ptr as _);
         arc.wake();
         mem::forget(arc);
     }

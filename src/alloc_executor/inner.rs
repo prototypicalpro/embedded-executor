@@ -12,7 +12,8 @@ use core::{
 
 use alloc::{
     collections::VecDeque,
-    sync::Arc,
+    // WARNING: This should be Arc! This might be unsafe code
+    rc::Rc
 };
 
 use futures::{
@@ -137,7 +138,7 @@ where
     fn spawn_local(&mut self, future: LocalFutureObj<'a, ()>, loc: SpawnLoc) {
         let id = self.registry.insert(Task::new(future));
 
-        let queue_waker = Arc::new(QueueWaker::new(
+        let queue_waker = Rc::new(QueueWaker::new(
             self.queue.clone(),
             id,
             self.sleep_waker.clone(),
@@ -250,13 +251,13 @@ impl<'a> Task<'a> {
 
 type Queue<'a> = VecDeque<QueueItem<'a>>;
 
-type QueueHandle<'a, R> = Arc<Mutex<R, Queue<'a>>>;
+type QueueHandle<'a, R> = Rc<Mutex<R, Queue<'a>>>;
 
 fn new_queue<'a, R>(capacity: usize) -> QueueHandle<'a, R>
 where
     R: RawMutex,
 {
-    Arc::new(Mutex::new(Queue::with_capacity(capacity)))
+    Rc::new(Mutex::new(Queue::with_capacity(capacity)))
 }
 
 enum QueueItem<'a> {

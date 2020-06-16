@@ -17,8 +17,8 @@ default-features = false
 features = ["alloc", "unstable", "cfg-target-has-atomic"]
 
 [dependencies.generational-arena]
-version = "0.2.7"
-default_features = false
+version = "0.2"
+default-features = false
 optional = true
 
 [dev-dependencies]

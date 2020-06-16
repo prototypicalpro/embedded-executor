@@ -58,7 +58,6 @@
 #![warn(missing_docs)]
 
 extern crate alloc;
-
 mod sleep;
 pub use self::sleep::*;
 
@@ -66,9 +65,6 @@ pub use self::sleep::*;
 pub mod alloc_executor;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub use self::alloc_executor::inner::AllocExecutor;
-
-#[cfg(any(feature = "alloc", feature = "std"))]
-mod future_box;
 
 mod wake;
 pub use self::wake::*;

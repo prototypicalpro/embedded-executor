@@ -13,7 +13,8 @@ use core::{
 use alloc::{
     collections::VecDeque,
     // WARNING: This should be Arc! This might be unsafe code
-    rc::Rc
+    rc::Rc,
+    boxed::Box
 };
 
 use futures::{
@@ -40,7 +41,6 @@ use generational_arena::{
 };
 
 use crate::{
-    future_box,
     sleep::*,
     wake::{
         Wake,
@@ -171,7 +171,7 @@ where
     where
         F: Future<Output = ()> + 'a,
     {
-        self.spawn_raw(future_box::make_local(future));
+        self.spawn_raw(Box::new(future));
     }
 
     /// Polls a task with the given id
@@ -352,7 +352,7 @@ where
     where
         F: Future<Output = ()> + 'a,
     {
-        self.spawn_raw(future_box::make_local(future))
+        self.spawn_raw(Box::new(future))
     }
 }
 
@@ -402,7 +402,7 @@ where
     where
         F: Future<Output = ()> + Send + 'a,
     {
-        self.spawn_raw(future_box::make_obj(future));
+        self.spawn_raw(Box::new(future));
     }
 }
 
@@ -509,7 +509,7 @@ mod test {
             };
             println!("spawning!");
             spawner
-                .spawn_obj(FutureObj::new(future_box::make_obj(spam)))
+                .spawn_obj(FutureObj::new(Box::new(spam)))
                 .unwrap();
         }
     }
@@ -519,7 +519,7 @@ mod test {
         let mut spawner = executor.spawner();
         let entry = future::lazy(move |_| {
             for i in 0..10 {
-                spawner.spawn_raw(future_box::make_obj(future::lazy(move |_| {
+                spawner.spawn_raw(Box::new(future::lazy(move |_| {
                     println!("{}", i);
                 })));
             }

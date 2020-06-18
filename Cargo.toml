@@ -11,6 +11,10 @@ repository = "https://gitlab.com/polymer-kb/firmware/embedded-executor"
 [dependencies]
 lock_api = "0.3.3"
 
+[dependencies.cooked-waker]
+version = "2"
+default-features = false
+
 [dependencies.futures]
 version = "0.3"
 default-features = false
@@ -20,6 +24,14 @@ features = ["alloc", "unstable", "cfg-target-has-atomic"]
 version = "0.2"
 default-features = false
 optional = true
+
+[dependencies.archery]
+version = "0.3.1-pre"
+default-features = false
+
+[dependencies.stowaway]
+version = "2"
+default-features = false
 
 [dev-dependencies]
 embrio-async = { git = "https://gitlab.com/polymer-kb/third-party/embrio-rs" }

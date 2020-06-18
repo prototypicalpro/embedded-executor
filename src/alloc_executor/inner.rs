@@ -12,10 +12,12 @@ use core::{
 
 use alloc::{
     collections::VecDeque,
-    // WARNING: This should be Arc! This might be unsafe code
-    rc::Rc,
     boxed::Box
 };
+
+use archery::{ SharedPointerKind, SharedPointer };
+
+use cooked_waker::{ Wake, WakeRef, IntoWaker };
 
 use futures::{
     future::{
@@ -42,10 +44,7 @@ use generational_arena::{
 
 use crate::{
     sleep::*,
-    wake::{
-        Wake,
-        WakeExt,
-    },
+    wake::SP,
 };
 
 // default initial registry capacity
@@ -53,6 +52,14 @@ const REG_CAP: usize = 16;
 
 // default initial queue capacity
 const QUEUE_CAP: usize = REG_CAP / 2;
+
+#[inline]
+pub unsafe fn transmute<A, B>(a: A) -> B {
+    let b = ::core::ptr::read(&a as *const A as *const B);
+    ::core::mem::forget(a);
+    b
+}
+
 
 // TODO: Investigate lock-free queues rather than using Mutexes. Might not
 // really get us much for embedded devices where disabling interrupts is just an
@@ -67,12 +74,13 @@ const QUEUE_CAP: usize = REG_CAP / 2;
 ///
 /// The `Sleep` implementation can be used to put the event loop into a low-power
 /// state using something like `cortex_m::wfi/e`.
-pub struct AllocExecutor<'a, R, S>
+pub struct AllocExecutor<'a, R, S, A>
 where
     R: RawMutex,
+    A: SharedPointerKind,
 {
     registry: Arena<Task<'a>>,
-    queue: QueueHandle<'a, R>,
+    queue: QueueHandle<'a, R, A>,
     sleep_waker: S,
 }
 
@@ -82,20 +90,22 @@ enum SpawnLoc {
     Back,
 }
 
-impl<'a, R, S> Default for AllocExecutor<'a, R, S>
+impl<'a, R, S, A> Default for AllocExecutor<'a, R, S, A>
 where
-    R: RawMutex,
-    S: Sleep + Wake + Clone + Default,
+    R: RawMutex + 'static,
+    S: Sleep + Wake + WakeRef + Clone + Default + 'static,
+    A: SharedPointerKind + 'static
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a, R, S> AllocExecutor<'a, R, S>
+impl<'a, R, S, A> AllocExecutor<'a, R, S, A>
 where
-    R: RawMutex,
-    S: Sleep + Wake + Clone + Default,
+    R: RawMutex + 'static,
+    S: Sleep + Wake + Clone + Default + 'static,
+    A: SharedPointerKind + 'static
 {
     /// Initialize a new `AllocExecutor`
     ///
@@ -117,13 +127,13 @@ where
 
     /// Get a handle to a `Spawner` that can be passed to `Future` constructors
     /// to spawn even *more* `Future`s
-    pub fn spawner(&self) -> Spawner<'a, R> {
+    pub fn spawner(&self) -> Spawner<'a, R, A> {
         Spawner::new(self.queue.clone())
     }
 
     /// Get a handle to a `LocalSpawner` that can be passed to local `Future` constructors
     /// to spawn even *more* local `Future`s
-    pub fn local_spawner(&self) -> LocalSpawner<'a, R> {
+    pub fn local_spawner(&self) -> LocalSpawner<'a, R, A> {
         LocalSpawner::new(Spawner::new(self.queue.clone()))
     }
 
@@ -138,12 +148,11 @@ where
     fn spawn_local(&mut self, future: LocalFutureObj<'a, ()>, loc: SpawnLoc) {
         let id = self.registry.insert(Task::new(future));
 
-        let queue_waker = Rc::new(QueueWaker::new(
+        let queue_waker = SP(SharedPointer::<QueueWaker<R, S, A>, A>::new(QueueWaker::new(
             self.queue.clone(),
             id,
             self.sleep_waker.clone(),
-        ));
-
+        )));
         let waker = queue_waker.into_waker();
         self.registry.get_mut(id).unwrap().set_waker(waker);
 
@@ -251,13 +260,14 @@ impl<'a> Task<'a> {
 
 type Queue<'a> = VecDeque<QueueItem<'a>>;
 
-type QueueHandle<'a, R> = Rc<Mutex<R, Queue<'a>>>;
+type QueueHandle<'a, R, A> = SharedPointer<Mutex<R, Queue<'a>>, A>;
 
-fn new_queue<'a, R>(capacity: usize) -> QueueHandle<'a, R>
+fn new_queue<'a, R, A>(capacity: usize) -> QueueHandle<'a, R, A>
 where
     R: RawMutex,
+    A: SharedPointerKind
 {
-    Rc::new(Mutex::new(Queue::with_capacity(capacity)))
+    SharedPointer::new(Mutex::new(Queue::with_capacity(capacity)))
 }
 
 enum QueueItem<'a> {
@@ -267,38 +277,54 @@ enum QueueItem<'a> {
 
 // Super simple Wake implementation
 // Sticks the Index into the queue and calls W::wake
-struct QueueWaker<R, W>
+struct QueueWaker<R, W, A>
 where
-    R: RawMutex,
+    R: RawMutex + 'static,
+    A: SharedPointerKind + 'static,
+    W: 'static,
 {
-    queue: QueueHandle<'static, R>,
+    queue: QueueHandle<'static, R, A>,
     id: Index,
     waker: W,
 }
 
-impl<R, W> QueueWaker<R, W>
+impl<'a, R, W, A> QueueWaker<R, W, A>
 where
-    R: RawMutex,
-    W: Wake,
+    R: RawMutex + 'a,
+    W: Wake + 'a,
+    A: SharedPointerKind
 {
-    fn new(queue: QueueHandle<'_, R>, id: Index, waker: W) -> Self {
+    fn new(queue: QueueHandle<'_, R, A>, id: Index, waker: W) -> Self {
         QueueWaker {
             // Safety: The QueueWaker only deals in 'static lifetimed things, i.e.
             // task `Index`es, only writes to the queue, and will never give anyone
             // else this transmuted version.
-            queue: unsafe { mem::transmute(queue) },
+            queue: unsafe { transmute(queue) },
             id,
             waker,
         }
     }
 }
 
-impl<R, W> Wake for QueueWaker<R, W>
+impl<'a, R, W, A> WakeRef for QueueWaker<R, W, A>
 where
-    R: RawMutex,
-    W: Wake,
+    R: RawMutex + 'a,
+    W: Wake + Clone + 'a,
+    A: SharedPointerKind,
 {
-    fn wake(&self) {
+    fn wake_by_ref(&self) {
+        self.queue.lock().push_back(QueueItem::Poll(self.id));
+        self.waker.clone().wake();
+    }
+}
+
+impl<'a, R, W, A> Wake for QueueWaker<R, W, A>
+    where
+        R: RawMutex + 'a,
+        W: Wake + Clone + 'a,
+        A: SharedPointerKind,
+{
+    fn wake(self) {
         self.queue.lock().push_back(QueueItem::Poll(self.id));
         self.waker.wake();
     }
@@ -310,21 +336,24 @@ where
 ///
 /// Use a `Spawner` to spawn futures from *other* threads.
 #[derive(Clone)]
-pub struct LocalSpawner<'a, R>(Spawner<'a, R>, PhantomData<LocalFutureObj<'a, ()>>)
+pub struct LocalSpawner<'a, R, A>(Spawner<'a, R, A>, PhantomData<LocalFutureObj<'a, ()>>)
 where
+    A: SharedPointerKind,
     R: RawMutex;
 
-impl<'a, R> LocalSpawner<'a, R>
+impl<'a, R, A> LocalSpawner<'a, R, A>
 where
+    A: SharedPointerKind,
     R: RawMutex,
 {
-    fn new(spawner: Spawner<'a, R>) -> Self {
+    fn new(spawner: Spawner<'a, R, A>) -> Self {
         LocalSpawner(spawner, PhantomData)
     }
 }
 
-impl<'a, R> LocalSpawner<'a, R>
+impl<'a, R, A> LocalSpawner<'a, R, A>
 where
+    A: SharedPointerKind,
     R: RawMutex,
 {
     fn spawn_local(&self, future: LocalFutureObj<'a, ()>) -> Result<(), SpawnError> {
@@ -356,8 +385,9 @@ where
     }
 }
 
-impl<'a, R> LocalSpawn for LocalSpawner<'a, R>
+impl<'a, R, A> LocalSpawn for LocalSpawner<'a, R, A>
 where
+    A: SharedPointerKind,
     R: RawMutex,
 {
     fn spawn_local_obj(&self, future: LocalFutureObj<'a, ()>) -> Result<(), SpawnError> {
@@ -369,15 +399,17 @@ where
 ///
 /// This can be cloned and passed to an async function to allow it to spawn more
 /// tasks.
-pub struct Spawner<'a, R>(QueueHandle<'a, R>)
+pub struct Spawner<'a, R, A>(QueueHandle<'a, R, A>)
 where
+    A: SharedPointerKind,
     R: RawMutex;
 
-impl<'a, R> Spawner<'a, R>
+impl<'a, R, A> Spawner<'a, R, A>
 where
     R: RawMutex,
+    A: SharedPointerKind,
 {
-    fn new(handle: QueueHandle<'a, R>) -> Self {
+    fn new(handle: QueueHandle<'a, R, A>) -> Self {
         Spawner(handle)
     }
 
@@ -406,29 +438,32 @@ where
     }
 }
 
-impl<'a, R> Clone for Spawner<'a, R>
+impl<'a, R, A> Clone for Spawner<'a, R, A>
 where
     R: RawMutex,
+    A: SharedPointerKind,
 {
     fn clone(&self) -> Self {
         Spawner(self.0.clone())
     }
 }
 
-impl<'a, R> Spawn for Spawner<'a, R>
+impl<'a, R, A> Spawn for Spawner<'a, R, A>
 where
     R: RawMutex,
+    A: SharedPointerKind,
 {
     fn spawn_obj(&self, future: FutureObj<'static, ()>) -> Result<(), SpawnError> {
         Ok(Spawner::spawn_obj(self, future))
     }
 }
 
-impl<'a, R> From<LocalSpawner<'a, R>> for Spawner<'a, R>
+impl<'a, R, A> From<LocalSpawner<'a, R, A>> for Spawner<'a, R, A>
 where
     R: RawMutex,
+    A: SharedPointerKind,
 {
-    fn from(other: LocalSpawner<'a, R>) -> Self {
+    fn from(other: LocalSpawner<'a, R, A>) -> Self {
         other.0
     }
 }

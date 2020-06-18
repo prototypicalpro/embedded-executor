@@ -1,3 +1,28 @@
+pub use cooked_waker::{ WakeRef, Wake };
+use archery::{ SharedPointer, SharedPointerKind };
+
+pub struct SP<T, P: SharedPointerKind> (pub SharedPointer<T, P>);
+
+impl<T: WakeRef + Sized, P: SharedPointerKind> WakeRef for SP<T, P> {
+    #[inline]
+    fn wake_by_ref(&self) {
+        T::wake_by_ref(self.0.as_ref())
+    }
+}
+
+impl<T: Wake + Sized, P: SharedPointerKind> Wake for SP<T, P> {}
+
+impl<T: WakeRef + Sized, P: SharedPointerKind> Clone for SP<T, P> {
+    fn clone(&self) -> Self {
+        SP(self.0.clone())
+    }
+}
+
+unsafe impl<T: WakeRef + Sized, P: SharedPointerKind> Send for SP<T, P> {}
+unsafe impl<T: WakeRef + Sized, P: SharedPointerKind> Sync for SP<T, P> {}
+unsafe impl<T: WakeRef + Sized, P: SharedPointerKind> stowaway::Stowable for SP<T, P> {}
+
+/*
 use core::task::{
     RawWaker,
     Waker,
@@ -5,7 +30,7 @@ use core::task::{
 
 // WARNING: This should be Arc!
 #[cfg(any(feature = "alloc", feature = "std"))]
-use alloc::rc::Rc;
+use archery::SharedPointer;
 
 /// Wake trait
 ///
@@ -69,5 +94,5 @@ mod arc {
             drop_arc_waker_raw::<T>,
         )
     }
-
 }
+*/

@@ -29,8 +29,8 @@
 //! [`lock_api`]: https://docs.rs/lock_api/0.1.5/lock_api/
 //! [`cortex_m::asm::wfi`]: https://docs.rs/cortex-m/0.5.8/cortex_m/asm/fn.wfi.html
 //!
-//! Once you have all of these pieces, it's usually easiest to create an alias for
-//! your platform-specific executor:
+//! Once you have all of these pieces, it's usually easiest to create an alias
+//! for your platform-specific executor:
 //!
 //! ```rust,ignore
 //! type Executor<'a> = AllocExecutor<'a, IFreeMutex, WFISleep>;
